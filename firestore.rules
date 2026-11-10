@@ -1,0 +1,14 @@
+rules_version = '2';
+
+// GaronchiHisaab: each person can read and write only their own document,
+// and only the two invited Google accounts can use the database at all.
+// To invite or remove someone, change the addresses below and in js/firebase-config.js.
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /users/{uid} {
+      allow read, write: if request.auth != null
+        && request.auth.uid == uid
+        && request.auth.token.email in ['jaidevsinghchib@gmail.com', 'kavishatalwar@gmail.com'];
+    }
+  }
+}

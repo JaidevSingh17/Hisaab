@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en-IN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>GaronchiHisaab</title>
+<meta name="description" content="Track what comes in, what goes out, and what you save. Your data stays on this device.">
+<meta name="theme-color" content="#EDF2EE" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0F1220" media="(prefers-color-scheme: dark)">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Hisaab">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" type="image/png" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+
+<div id="splash" class="splash" role="status" aria-live="polite">
+  <p class="wordmark">GaronchiHisaab</p>
+  <span class="spinner big" aria-hidden="true"></span>
+  <p id="splash-text">Opening your hisaab</p>
+</div>
+<div id="progress" class="progress" aria-hidden="true"><i></i></div>
+<div id="ptr" class="ptr" aria-hidden="true"><span class="spinner"></span></div>
+
+<div id="login" class="lock" hidden>
+  <div class="lock-box">
+    <p class="wordmark">GaronchiHisaab</p>
+    <p>Sign in to open your hisaab.</p>
+    <button type="button" class="btn primary block" data-action="sign-in">Sign in with Google</button>
+    <p id="login-err" class="err" role="alert"></p>
+    <p class="note">Only invited Google accounts can open this app.</p>
+  </div>
+</div>
+
+<div id="lock" class="lock" hidden>
+  <form class="lock-box" id="lock-form" autocomplete="off">
+    <p class="wordmark">GaronchiHisaab</p>
+    <label for="lock-pin">Enter your PIN</label>
+    <input id="lock-pin" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="4" autocomplete="off" aria-describedby="lock-err">
+    <p id="lock-err" class="err" role="alert"></p>
+    <button type="button" class="link" data-action="forgot-pin">Forgot PIN? Erase this device's data</button>
+  </form>
+</div>
+
+<div class="app" id="app">
+  <header class="top">
+    <p class="wordmark">GaronchiHisaab</p>
+    <div class="month" id="month-switch">
+      <button type="button" class="icon-btn" data-action="prev-month" aria-label="Previous month" data-icon="left"></button>
+      <span id="month-label" aria-live="polite"></span>
+      <button type="button" class="icon-btn" data-action="next-month" id="next-month" aria-label="Next month" data-icon="right"></button>
+    </div>
+  </header>
+
+  <nav class="tabs" aria-label="Sections">
+    <button type="button" data-tab="home"><span class="ti" data-icon="home"></span>Home</button>
+    <button type="button" data-tab="entries"><span class="ti" data-icon="list"></span>Entries</button>
+    <button type="button" data-tab="budgets"><span class="ti" data-icon="pie"></span>Budgets</button>
+    <button type="button" data-tab="plan"><span class="ti" data-icon="target"></span>Plan</button>
+    <button type="button" data-tab="report"><span class="ti" data-icon="chart"></span>Report</button>
+    <button type="button" data-tab="settings"><span class="ti" data-icon="sliders"></span>Settings</button>
+  </nav>
+
+  <main id="view" tabindex="-1"></main>
+</div>
+
+<button type="button" class="fab" data-action="add-entry" aria-label="Add entry"><span data-icon="plus"></span>Add entry</button>
+
+<dialog id="sheet" aria-labelledby="sheet-title"></dialog>
+<div id="toast" class="toast" role="status" hidden></div>
+<div id="tip" class="tip" hidden></div>
+
+<script src="js/firebase-config.js"></script>
+<script src="js/icons.js"></script>
+<script src="js/store.js"></script>
+<script src="js/charts.js"></script>
+<script src="js/app.js"></script>
+<script type="module" src="js/cloud.js"></script>
+</body>
+</html>
