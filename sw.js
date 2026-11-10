@@ -1,6 +1,6 @@
 /* GaronchiHisaab offline support. Bump VERSION whenever any file changes so phones pick up the update. */
-const VERSION = 'gh-v7';
-const FILES = ['./', 'index.html', 'css/styles.css', 'js/firebase-config.js', 'js/icons.js', 'js/store.js', 'js/cloud.js', 'js/charts.js', 'js/app.js', 'manifest.json',
+const VERSION = 'gh-v19';
+const FILES = ['./', 'index.html', 'css/styles.css', 'js/firebase-config.js', 'js/icons.js', 'js/store.js', 'js/cloud.js', 'js/charts.js', 'js/leaves.js', 'js/app.js', 'manifest.json',
   'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png'];
 
 self.addEventListener('install', e => {
@@ -13,8 +13,10 @@ self.addEventListener('activate', e => {
 self.addEventListener('fetch', e => {
   if (e.request.method !== 'GET') return;
   const url = new URL(e.request.url);
-  /* the sign-in and sync library: its address includes a version, so a saved copy never goes stale */
-  if (url.origin === 'https://www.gstatic.com' && url.pathname.startsWith('/firebasejs/')) {
+  /* the sign-in library and the typeface come from Google: keep a saved copy so the app opens offline */
+  const library = url.origin === 'https://www.gstatic.com' && url.pathname.startsWith('/firebasejs/');
+  const font = url.origin === 'https://fonts.googleapis.com' || url.origin === 'https://fonts.gstatic.com';
+  if (library || font) {
     e.respondWith(caches.match(e.request).then(hit => hit || fetch(e.request).then(res => {
       if (res.ok) { const copy = res.clone(); caches.open(VERSION).then(c => c.put(e.request, copy)); }
       return res;
