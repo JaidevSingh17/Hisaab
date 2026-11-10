@@ -8,6 +8,14 @@ const UI = { tab: 'home', ym: curYm(), filters: { q: '', type: '', cat: '', mode
 /* bridge to js/cloud.js, which fills in signIn, signOut, reauth and push once Firebase has loaded */
 const Cloud = window.HisaabCloud = { on: CLOUD_ON, booted: false, user: null, status: '', loginMsg: '', signIn: null, signOut: null, reauth: null, push: null, onStatus: null, fallback: null };
 onStateSaved = () => { if (Cloud.push) Cloud.push(); };
+/* the name to greet someone by: the one they typed, else the first name on their Google account */
+/* round profile picture from the Google account; the initial shows underneath if there is no picture or it cannot load (offline) */
+function avatar() {
+  const u = Cloud.user, name = displayName() || (u && u.email) || '?';
+  const photo = u && /^https:\/\//.test(u.photo || '') ? `<img src="${esc(u.photo)}" alt="" referrerpolicy="no-referrer" onerror="this.remove()">` : '';
+  return `<span class="avatar" aria-hidden="true">${esc(name.charAt(0).toUpperCase())}${photo}</span>`;
+}
+const displayName = () => S.settings.name || (Cloud.user && Cloud.user.name ? Cloud.user.name.split(' ')[0] : '');
 
 /* ================= screens ================= */
 
@@ -23,6 +31,9 @@ function txRow(t, withDate) {
 function vHome() {
   const ym = UI.ym, t = totals(ym), isCur = ym === curYm(), st = S.settings;
   let h = '';
+
+  const who = displayName();
+  if (who) h += `<div class="span"><h1 class="page-title">Hello, ${esc(who)}</h1><p class="lede">${isCur ? 'Here is how ' + esc(monthName(ym)) + ' is going.' : 'Here is how ' + esc(monthName(ym)) + ' went.'}</p></div>`;
 
   if (!S.tx.length && !st.stipend) {
     h += `<section class="banner span"><p><strong>Start with your stipend</strong>Tell the app how much you earn each month so it can build your plan.</p>
@@ -48,16 +59,16 @@ function vHome() {
     : `You have used ${rs(-al.left)} of the ${sp.savings}% you planned to save.`;
   else if (t.income > 0) foot = t.saved >= 0 ? `You kept ${Math.round(t.rate)}% of what came in.` : 'You spent more than came in this month.';
   else if (t.spent > 0) foot = 'No income recorded for this month yet.';
-  h += `<section class="card sum">
-    <table><caption class="sr">Summary for ${esc(monthName(ym))}</caption>
-      <tr><th scope="row">Came in${stx ? `<span class="got">${icon('check', 's')}Stipend received ${esc(shortDate(stx.date))}</span>` : ''}</th><td class="in">+ ${rs(t.income)}</td></tr>
-      <tr><th scope="row">Went out</th><td>− ${rs(t.spent)}</td></tr>
-      <tr class="total"><th scope="row">${t.saved < 0 ? 'Overspent' : 'Saved'}</th><td class="${t.saved < 0 ? 'neg' : ''}">${rs(Math.abs(t.saved))}</td></tr>
-    </table>${foot ? `<p class="foot">${foot}</p>` : ''}</section>`;
+  h += `<section class="hero span">
+    <p class="hero-label">${t.saved < 0 ? 'Overspent in' : 'Saved in'} ${esc(monthName(ym))}</p>
+    <p class="hero-num${t.saved < 0 ? ' neg' : ''}">${rs(Math.abs(t.saved))}</p>
+    <dl class="hero-stats"><div><dt>Came in</dt><dd>${rs(t.income)}</dd></div><div><dt>Went out</dt><dd>${rs(t.spent)}</dd></div><div><dt>Kept</dt><dd>${t.income > 0 ? Math.round(t.rate) + '%' : 'n/a'}</dd></div></dl>
+    ${stx ? `<p class="hero-got">${icon('check', 's')}Stipend received ${esc(shortDate(stx.date))}</p>` : ''}
+    ${foot ? `<p class="hero-foot">${foot}</p>` : ''}</section>`;
   UI.freshStamp = false;
 
   if (!t.count) {
-    h += `<section class="card empty"><h2>Nothing recorded for ${esc(monthName(ym))}</h2><p>Add what you earned or spent and this page fills in.</p>
+    h += `<section class="card empty span"><h2>Nothing recorded for ${esc(monthName(ym))}</h2><p>Add what you earned or spent and this page fills in.</p>
       <button type="button" class="btn primary" data-action="add-entry">Add entry</button></section>`;
   } else {
     /* needs / wants / saved */
@@ -167,6 +178,15 @@ function goalCard(g) {
     <div class="btn-row" style="margin-top:10px"><button type="button" class="btn small primary" data-action="goal-money" data-id="${g.id}">Add money</button>
     <button type="button" class="btn small" data-action="edit-goal" data-id="${g.id}">Edit</button></div></div>`;
 }
+function purchaseCard(g) {
+  const a = purchaseAdvice(g);
+  return `<div class="bud"><div class="bud-top"><b>${esc(g.name)}</b><span class="num"><b>${rs(g.saved)}</b> of ${rs(a.target)}</span></div>
+    <div class="meter plain"><i style="width:${a.pct.toFixed(1)}%"></i></div>
+    ${a.done ? `<p class="state ok"><span class="dot">${icon('check', 's')}</span>You have the full amount. Time to buy it.</p>`
+      : `<p class="state"><span>${rs(a.left)} still to put aside</span></p><ul class="advice">${a.lines.map(l => `<li>${esc(l)}</li>`).join('')}</ul>`}
+    <div class="btn-row" style="margin-top:12px"><button type="button" class="btn small primary" data-action="goal-money" data-id="${g.id}">Add money</button>
+    <button type="button" class="btn small" data-action="edit-goal" data-id="${g.id}">Edit</button></div></div>`;
+}
 function vPlan() {
   const p = plan(UI.ym), sp = S.settings.split;
   let h = `<div><h1 class="page-title">Plan</h1><p class="lede">Split what comes in three ways, then check how the month is really going.</p></div>`;
@@ -204,8 +224,12 @@ function vPlan() {
     const first = (S.settings.stipend || p.base) * sp.savings / 100;
     h += `<section class="card"><h2>Pay yourself first</h2><p style="margin-top:8px">The day your stipend arrives, move <b>${rs(Math.round(first))}</b> into savings before you spend anything. What stays in your account is yours to spend without guilt.</p></section>`;
   }
-  h += `<section class="card"><div class="card-head"><div><h2>Goals</h2><p class="sub">Money you have put aside for something</p></div>
-    <button type="button" class="btn small" data-action="new-goal">New goal</button></div>${S.goals.map(goalCard).join('')}</section>`;
+  const buys = S.goals.filter(g => g.id !== 'emergency');
+  h += `<section class="card"><div class="card-head"><div><h2>Things to buy</h2><p class="sub">Add something you want and its price, and see how to save for it</p></div>
+    <button type="button" class="btn small" data-action="new-goal">Add a purchase</button></div>
+    ${buys.length ? buys.map(purchaseCard).join('') + (buys.length > 1 ? '<p class="note" style="margin-top:10px">Each estimate assumes all your monthly saving goes to that one item. Saving for several at once takes longer.</p>' : '')
+      : '<div class="empty"><h2>Nothing planned yet</h2><p>Add a phone, a trip or anything else with its price. The app works out how much to put aside each month, based on what you really spend.</p></div>'}</section>
+  <section class="card"><div class="card-head"><div><h2>Safety net</h2><p class="sub">Money kept for surprises</p></div></div>${goalCard(S.goals.find(g => g.id === 'emergency'))}</section>`;
   return h;
 }
 
@@ -234,8 +258,10 @@ function accountCard() {
   if (!Cloud.on) return `<section class="card"><div class="set-row"><div class="t"><b>Sign-in and sync</b><span>Not set up yet, so entries stay on this device. The steps are in SETUP.md.</span></div></div></section>`;
   const u = Cloud.user;
   if (!u) return `<section class="card"><div class="set-row"><div class="t"><b>Offline</b><span>Showing the entries saved on this device. Sync starts again when you are online.</span></div></div></section>`;
-  return `<section class="card"><div class="set-row"><div class="t"><b>${esc(u.name || 'Signed in')}</b><span>${esc(u.email)}</span><span>${SYNC_TEXT[Cloud.status] || ''}</span></div>
-    <button type="button" class="btn small" data-action="sign-out">Sign out</button></div></section>`;
+  return `<section class="card"><div class="set-row"><div class="who-row">${avatar()}<div class="t"><b>${esc(displayName() || 'Signed in')}</b><span>${esc(u.email)}</span><span>${SYNC_TEXT[Cloud.status] || ''}</span></div></div>
+    <button type="button" class="btn small" data-action="sign-out">Sign out</button></div>
+    <div class="set-row"><div class="t"><b>Your name</b><span>Shown in the greeting on Home</span></div>
+    <button type="button" class="btn small" data-action="edit-name">Change</button></div></section>`;
 }
 
 function vSettings() {
@@ -259,7 +285,8 @@ function vSettings() {
     ${custom.length ? custom.map(c => `<div class="set-row"><div class="t"><b class="ttl">${icon(c.icon, 's')}${esc(c.name)}</b><span>${c.type === 'income' ? 'Income' : c.group === 'needs' ? 'Expense, a need' : 'Expense, a want'}</span></div>
       <button type="button" class="btn small danger" data-action="delete-cat" data-id="${c.id}" data-confirm="Tap again to remove">Remove</button></div>`).join('') : '<p class="note">You have not added any categories.</p>'}</section>
 
-  <section class="card"><div class="field"><span class="lbl">Appearance</span><div id="theme-ctl">${seg('theme', [['auto', 'Match phone'], ['light', 'Light'], ['dark', 'Dark']], st.theme)}</div></div></section>
+  <section class="card"><div class="field"><span class="lbl">Appearance</span><div id="theme-ctl">${seg('theme', [['light', 'Light'], ['dark', 'Dark']], st.theme)}</div></div>
+    <label class="check" style="margin-top:16px"><input type="checkbox" name="leaves" ${st.leaves ? 'checked' : ''}><span>Autumn leaves falling across the screen</span></label></section>
 
   <section class="card"><div class="set-row"><div class="t"><b>PIN lock</b><span>${st.pin ? 'On, asked each time you open the app.' : 'Off.'} It keeps casual eyes out but does not encrypt your data.</span></div>
     <button type="button" class="btn small" data-action="pin">${st.pin ? 'Change or remove' : 'Set a PIN'}</button></div></section>
@@ -280,6 +307,9 @@ function renderChrome() {
   $('#month-switch').style.visibility = UI.tab === 'settings' ? 'hidden' : '';
   document.querySelectorAll('.tabs button').forEach(b => b.dataset.tab === UI.tab ? b.setAttribute('aria-current', 'page') : b.removeAttribute('aria-current'));
   moveTabBg();
+  const su = $('#side-user'), u = Cloud.user;
+  su.hidden = !u;
+  if (u) su.innerHTML = `<div class="who-row">${avatar()}<div class="who"><b>${esc(displayName() || 'Signed in')}</b><span>${esc(u.email)}</span></div></div><button type="button" class="btn small block" data-action="sign-out">Sign out</button>`;
 }
 function render() {
   renderChrome();
@@ -287,8 +317,10 @@ function render() {
   hideTip();
 }
 function applyTheme() {
-  const t = S.settings.theme;
-  if (t === 'auto') delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme = t;
+  const dark = S.settings.theme === 'dark';
+  document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+  $('meta[name="theme-color"]').content = dark ? '#15201A' : '#FFFFFF';
+  Leaves.set(S.settings.leaves);
 }
 
 /* ================= sheets (forms) ================= */
@@ -366,12 +398,12 @@ function splitSheet() {
 }
 function goalSheet(g) {
   const em = g && g.id === 'emergency';
-  openSheet(g ? 'Edit goal' : 'New goal', `<form class="stack" data-form="goal" data-id="${g ? g.id : ''}" novalidate>
-    ${em ? '' : `<div class="field"><label for="f-name">What are you saving for?</label><input id="f-name" name="name" type="text" maxlength="40" placeholder="New laptop" value="${esc(g ? g.name : '')}" required></div>`}
-    ${amountField(g ? g.target : '', em ? 'Target in ₹ (leave empty for three months of spending)' : 'Target in ₹', 'target')}
-    ${em ? '' : `<div class="field"><label for="f-deadline">Target date <span style="font-weight:400">(optional)</span></label><input id="f-deadline" name="deadline" type="date" min="${today()}" value="${g ? g.deadline : ''}"></div>`}
-    ${ERR}<button class="btn primary block">Save goal</button>
-    ${g && !em ? '<button type="button" class="btn danger block" data-action="delete-goal" data-id="' + g.id + '" data-confirm="Tap again to delete">Delete goal</button>' : ''}</form>`);
+  openSheet(em ? 'Emergency fund' : g ? 'Edit purchase' : 'Plan a purchase', `<form class="stack" data-form="goal" data-id="${g ? g.id : ''}" novalidate>
+    ${em ? '' : `<div class="field"><label for="f-name">What do you want to buy?</label><input id="f-name" name="name" type="text" maxlength="40" placeholder="New laptop" value="${esc(g ? g.name : '')}" required></div>`}
+    ${amountField(g ? g.target : '', em ? 'Target in ₹ (leave empty for three months of spending)' : 'Price in ₹', 'target')}
+    ${em ? '' : `<div class="field"><label for="f-deadline">Buy it by <span style="font-weight:400">(optional)</span></label><input id="f-deadline" name="deadline" type="date" min="${today()}" value="${g ? g.deadline : ''}"></div>`}
+    ${ERR}<button class="btn primary block">${em ? 'Save target' : 'Save purchase'}</button>
+    ${g && !em ? '<button type="button" class="btn danger block" data-action="delete-goal" data-id="' + g.id + '" data-confirm="Tap again to remove">Remove purchase</button>' : ''}</form>`);
 }
 function goalMoneySheet(g) {
   openSheet(g.name, `<form class="stack" data-form="goal-money" data-id="${g.id}" novalidate>
@@ -396,6 +428,19 @@ function pinSheet() {
     <p class="note">There is no way to recover a forgotten PIN. You would have to erase the app and restore a backup.</p>
     ${ERR}<button class="btn primary block" name="act" value="set">Save PIN</button>
     ${has ? '<button class="btn danger block" name="act" value="remove">Remove PIN</button>' : ''}</form>`);
+}
+function nameSheet(welcome) {
+  const guess = S.settings.name || (Cloud.user && Cloud.user.name ? Cloud.user.name.split(' ')[0] : '');
+  openSheet(welcome ? 'Welcome to GaronchiHisaab' : 'Your name', `<form class="stack" data-form="name" novalidate>
+    <div class="field"><label for="f-name">${welcome ? 'What should we call you?' : 'Name'}</label>
+      <input id="f-name" name="name" type="text" maxlength="30" autocomplete="given-name" value="${esc(guess)}" required>
+      <span class="hint">Shown in the greeting on Home. You can change it later in Settings.</span></div>
+    ${ERR}<button class="btn primary block">Save name</button></form>`);
+  const inp = $('#f-name'); inp.focus(); inp.select();
+}
+/* ask once, the first time an account has no name; waits until the online copy has been checked */
+function maybeAskName() {
+  if (Cloud.user && !S.settings.name && !UI.askedName && !sheet.open && $('#lock').hidden && $('#login').hidden) { UI.askedName = true; nameSheet(true); }
 }
 function restoreSheet(d) {
   UI.restore = d;
@@ -472,13 +517,13 @@ const FORMS = {
   },
   goal(fd, form) {
     const id = form.dataset.id, target = amt(fd.get('target')) || 0;
-    if (id === 'emergency') { S.goals.find(g => g.id === id).target = target > 0 ? target : 0; return done('Goal saved'); }
+    if (id === 'emergency') { S.goals.find(g => g.id === id).target = target > 0 ? target : 0; return done('Target saved'); }
     const name = (fd.get('name') || '').trim(), deadline = fd.get('deadline') || '';
-    if (!name) return 'Give the goal a name.';
-    if (!(target > 0)) return 'Enter a target greater than zero.';
+    if (!name) return 'Say what you want to buy.';
+    if (!(target > 0)) return 'Enter the price.';
     if (id) Object.assign(S.goals.find(g => g.id === id), { name, target, deadline });
     else S.goals.push({ id: uid(), name, target, deadline, saved: 0, createdAt: today() });
-    done('Goal saved');
+    done('Purchase saved');
   },
   'goal-money'(fd, form, submitter) {
     const g = S.goals.find(x => x.id === form.dataset.id), amount = amt(fd.get('amount'));
@@ -498,6 +543,12 @@ const FORMS = {
     if (c.type === 'expense') c.group = kind;
     S.cats.push(c);
     done('Category added');
+  },
+  name(fd) {
+    const name = (fd.get('name') || '').trim().slice(0, 30);
+    if (!name) return 'Type the name you want to be greeted by.';
+    S.settings.name = name;
+    done('Hello, ' + name);
   },
   pin(fd, form, submitter) {
     if (S.settings.pin && pinHash(fd.get('old') || '') !== S.settings.pin) return 'The current PIN is not right.';
@@ -534,7 +585,7 @@ const ACTIONS = {
   'new-goal': () => goalSheet(),
   'edit-goal': el => goalSheet(byId(S.goals, el)),
   'goal-money': el => goalMoneySheet(byId(S.goals, el)),
-  'delete-goal'(el) { S.goals = S.goals.filter(g => g.id !== el.dataset.id); done('Goal deleted'); },
+  'delete-goal'(el) { S.goals = S.goals.filter(g => g.id !== el.dataset.id); done('Purchase removed'); },
   'new-recurring': () => recurringSheet(),
   'edit-recurring': el => recurringSheet(byId(S.recurring, el)),
   'delete-recurring'(el) { S.recurring = S.recurring.filter(r => r.id !== el.dataset.id); done('Repeating entry deleted'); },
@@ -566,6 +617,7 @@ const ACTIONS = {
   },
   'confirm-restore'() { const d = UI.restore; UI.restore = null; delete d.exportedAt; closeSheet(); fullLoader('Restoring your backup', 900, () => { S = adopt(d); S.epoch = Date.now(); applyTheme(); done('Backup restored'); }); },
   'erase'() { fullLoader('Erasing your data', 900, () => { S = freshState(); S.epoch = Date.now(); UI.ym = curYm(); applyTheme(); done('All data erased'); }); },
+  'edit-name': () => nameSheet(false),
   'sign-in'(el) {
     if (!Cloud.signIn) { $('#login-err').textContent = 'Still connecting. Try again in a moment.'; return; }
     $('#login-err').textContent = '';
@@ -618,7 +670,8 @@ document.addEventListener('submit', e => {
 document.addEventListener('change', e => {
   const t = e.target;
   if (t.name === 'type' && t.form && $('#cat-chips', t.form)) $('#cat-chips', t.form).innerHTML = catChips(t.value, '');
-  if (t.name === 'theme') { S.settings.theme = t.value; save(); applyTheme(); }
+  if (t.name === 'theme') { S.settings.theme = t.value; S.settings.themeSet = 3; save(); applyTheme(); }
+  if (t.name === 'leaves') { S.settings.leaves = t.checked; save(); applyTheme(); }
   const f = { 'f-scope': 'scope', 'f-type': 'type', 'f-cat': 'cat', 'f-mode': 'mode' }[t.id];
   if (f) { UI.filters[f] = t.value; $('#tx-list').innerHTML = txListHtml(); }
 });
@@ -796,18 +849,20 @@ function showLogin(msg) {
   $('#lock').hidden = true; $('#login').hidden = false; $('#app').inert = true; $('.fab').hidden = true;
   $('#login-err').textContent = msg || '';
   $('#splash').hidden = true;
+  UI.askedName = false;
 }
 /* called by cloud.js with the newest online copy (a JSON string, or null when nothing is stored online yet) */
 function cloudApply(json) {
   let remote = null;
   try { if (json) remote = adopt(JSON.parse(json)); } catch (e) { /* unreadable copy online: this device's data replaces it */ }
-  if (!remote) return { push: true };
+  if (!remote) { maybeAskName(); return { push: true }; }
   const merged = mergeStates(adopt(S), remote);
   if (JSON.stringify(merged) !== JSON.stringify(adopt(S))) {
     S = merged; saveLocal(); applyTheme();
     if (!applyRecurring()) { /* applyRecurring saves and re-sends by itself when it adds something */ }
     render();
   }
+  maybeAskName();
   return { push: JSON.stringify(adopt(S)) !== JSON.stringify(remote) };
 }
 const cloudPayload = () => JSON.stringify(adopt(S));

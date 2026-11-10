@@ -66,7 +66,7 @@ function freshState() {
     updatedAt: 0,    // when this device last changed anything
     epoch: 0,        // bumped by Erase and Restore, so a reset is never merged back with old entries
     trash: [],       // ids of deleted entries, so a delete on one device is not undone by another
-    settings: { stipend: 0, stipendDay: 1, split: { needs: 50, wants: 30, savings: 20 }, theme: 'auto', pin: null, lastBackup: null, createdAt: today() },
+    settings: { name: '', leaves: true, stipend: 0, stipendDay: 1, split: { needs: 50, wants: 30, savings: 20 }, theme: 'light', themeSet: false, pin: null, lastBackup: null, createdAt: today() },
     cats: DEFAULT_CATS.map(c => ({ ...c })),
     tx: [],          // {id, type, amount, cat, date, mode, note, rid?}
     budgets: {},     // catId -> monthly limit
@@ -89,9 +89,12 @@ function adopt(data) {
   let needs = Math.round(num(sp.needs ?? 50, 0, 100)), wants = Math.round(num(sp.wants ?? 30, 0, 100));
   if (needs + wants > 100) { needs = 50; wants = 30; }
   f.settings = {
+    name: str(st.name, 30).trim(),
+    leaves: st.leaves !== false,
     stipend: r2(num(st.stipend)), stipendDay: Math.round(num(st.stipendDay ?? 1, 1, 31)),
     split: { needs, wants, savings: 100 - needs - wants },
-    theme: ['auto', 'light', 'dark'].includes(st.theme) ? st.theme : 'auto',
+    /* light is the default; Dark only counts if the person picked it in Settings under this design */
+    theme: st.themeSet === 3 && st.theme === 'dark' ? 'dark' : 'light', themeSet: st.themeSet === 3 ? 3 : false,
     pin: typeof st.pin === 'string' && /^[0-9a-f]{1,8}$/.test(st.pin) ? st.pin : null,
     lastBackup: okDate(st.lastBackup) ? st.lastBackup : null,
     createdAt: okDate(st.createdAt) ? st.createdAt : today(),
@@ -262,6 +265,56 @@ function goalInfo(g) {
     o.perMonth = left / months; o.months = months;
     const frac = end > start ? Math.min(1, (now - start) / (end - start)) : 1;
     o.status = g.saved + 1 >= target * frac ? 'ontrack' : 'behind';
+  }
+  return o;
+}
+
+/* ---------- planning a purchase ---------- */
+/* What you usually have left in a month: the average of the last three finished months that had income.
+   Before there is any history, it falls back to the savings share of your stipend. */
+function usualSaving() {
+  const rows = [];
+  for (let i = 0, ym = addMonths(curYm(), -1); i < 6 && rows.length < 3; i++, ym = addMonths(ym, -1)) {
+    const t = totals(ym); if (t.income > 0) rows.push(t);
+  }
+  if (rows.length) {
+    const n = rows.length, avg = k => rows.reduce((a, t) => a + t[k], 0) / n, wants = {};
+    for (const t of rows) for (const [id, v] of Object.entries(t.byCat)) if (cat(id).group !== 'needs') wants[id] = (wants[id] || 0) + v / n;
+    const top = Object.entries(wants).sort((a, b) => b[1] - a[1])[0];
+    return { basis: 'history', months: n, saving: avg('saved'), income: avg('income'), topWant: top ? { id: top[0], amount: top[1] } : null };
+  }
+  const income = S.settings.stipend || totals(curYm()).income;
+  return { basis: income ? 'plan' : 'none', months: 0, saving: income * S.settings.split.savings / 100, income, topWant: null };
+}
+/* Advice for one planned purchase, as plain sentences. Each purchase is worked out as if all your saving went to it. */
+function purchaseAdvice(g) {
+  const i = goalInfo(g), u = usualSaving(), lines = [], o = { ...i, usual: u, lines };
+  if (i.done) return o;
+  if (u.basis === 'none') { lines.push('Set your stipend or record a month of income, and the app will work out how long this takes.'); return o; }
+  const usual = Math.max(0, u.saving), mo = n => n + (n === 1 ? ' month' : ' months');
+  const basis = u.basis === 'history'
+    ? `You usually keep ${rs(Math.round(usual))} a month (the average of your last ${mo(u.months)}).`
+    : `Your plan sets aside ${rs(Math.round(usual))} a month. This gets more accurate after a full month of entries.`;
+  const months = usual > 0 ? Math.ceil(i.left / usual) : null;
+  const when = months ? monthName(addMonths(curYm(), months)) : '';
+  if (g.deadline && i.status !== 'late') {
+    lines.push(`Put aside ${rs(Math.ceil(i.perMonth))} a month to buy it by ${shortDate(g.deadline)} ${g.deadline.slice(0, 4)}.`, basis);
+    o.fits = i.perMonth <= usual;
+    if (o.fits) lines.push('That fits inside what you already save.');
+    else {
+      const gap = i.perMonth - usual;
+      lines.push(`That is ${rs(Math.ceil(gap))} a month more than you usually save.`);
+      if (u.topWant) lines.push(`Your biggest want is ${cat(u.topWant.id).name}, about ${rs(Math.round(u.topWant.amount))} a month. ${u.topWant.amount >= gap ? 'Trimming it could cover the difference.' : 'Trimming it would cover part of the difference.'}`);
+      if (months) lines.push(`Or keep saving as usual and buy it around ${when}.`);
+    }
+  } else {
+    if (i.status === 'late') lines.push('The date you set has passed.');
+    lines.push(basis);
+    if (months) {
+      lines.push(`At that pace you can buy this in about ${mo(months)}, around ${when}.`);
+      const faster = Math.ceil(i.left / (usual * 1.25));
+      if (faster < months) lines.push(`Saving a quarter more each month would bring that down to about ${mo(faster)}.`);
+    } else lines.push('In a usual month nothing is left over, so there is no date yet. Free up money in Wants first.');
   }
   return o;
 }

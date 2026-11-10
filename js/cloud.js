@@ -86,7 +86,7 @@ async function boot() {
       return;
     }
 
-    C.user = { uid: user.uid, name: user.displayName || '', email: user.email || '' };
+    C.user = { uid: user.uid, name: user.displayName || '', email: user.email || '', photo: user.photoURL || '' };
     try { localStorage.setItem(LAST_UID, user.uid); } catch (e) {}
     startSession(user.uid);
 
