@@ -1,5 +1,5 @@
 /* GaronchiHisaab offline support. Bump VERSION whenever any file changes so phones pick up the update. */
-const VERSION = 'gh-v32';
+const VERSION = 'gh-v33';
 const FILES = ['./', 'index.html', 'css/styles.css', 'js/firebase-config.js', 'js/icons.js', 'js/store.js', 'js/cloud.js', 'js/charts.js', 'js/leaves.js', 'js/app.js', 'manifest.json',
   'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png'];
 

@@ -456,3 +456,9 @@ input.amount { font-size: 32px; font-weight: 800; letter-spacing: -0.03em; min-h
 .pb-amt.in { color: var(--in); }
 .pb-amt.out { color: var(--over); }
 .pb-bal { font-size: 12.5px; color: var(--ink2); font-weight: 600; font-variant-numeric: tabular-nums; }
+
+/* ---------- the Total / Bank / Cash switch on the summary block ---------- */
+.hero-switch { background: rgba(23, 37, 29, .12); margin-bottom: 18px; }
+.hero-switch span { color: var(--on-sun); }
+.hero-switch input:checked + span { background: #FFFFFF; color: #17251D; }
+.hero-stats dd { min-width: 0; }
