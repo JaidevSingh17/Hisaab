@@ -462,3 +462,9 @@ input.amount { font-size: 32px; font-weight: 800; letter-spacing: -0.03em; min-h
 .hero-switch span { color: var(--on-sun); }
 .hero-switch input:checked + span { background: #FFFFFF; color: #17251D; }
 .hero-stats dd { min-width: 0; }
+
+/* ---------- summary block actions and the passbook date picker ---------- */
+.hero-actions { margin-top: 16px; }
+.pb-pick { display: flex; gap: 8px; align-items: center; }
+.pb-pick input { flex: 1; }
+.pb-pick .btn { flex: none; }
