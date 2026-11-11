@@ -504,6 +504,22 @@ function getWalletInfo(key, targetYm) {
   return { has: false, balance: null, openingBalance: null, asOf: null, isCarriedForward: false };
 }
 
+/* One wallet in one month: what it started with, what came in and went out since then, and what is in it now.
+   Money moved between bank and cash counts here, so started + came in - went out always equals the balance. */
+function walletFlow(key, ym) {
+  const info = getWalletInfo(key, ym);
+  if (!info.has) return { has: false, opening: 0, in: 0, out: 0, balance: 0, asOf: null };
+  const modes = key === 'bank' ? BANK_MODES : CASH_MODES;
+  let cin = 0, cout = 0;
+  for (const t of (S.tx || [])) {
+    if (!t.date.startsWith(ym) || t.date < info.asOf) continue;
+    if (t.type === 'transfer') { if (t.to === key) cin += t.amount; if (t.from === key) cout += t.amount; continue; }
+    if (!modes.has(t.mode)) continue;
+    if (t.type === 'income') cin += t.amount; else cout += t.amount;
+  }
+  return { has: true, opening: info.openingBalance, in: r2(cin), out: r2(cout), balance: info.balance, asOf: info.asOf };
+}
+
 function hasWallet(key, ym) {
   const targetYm = ym || (typeof UI !== 'undefined' && UI.ym) || curYm();
   return getWalletInfo(key, targetYm).has;

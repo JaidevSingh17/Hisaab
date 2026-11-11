@@ -3,7 +3,7 @@
 
 const $ = (s, r = document) => r.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const UI = { tab: 'home', ym: curYm(), filters: { q: '', type: '', cat: '', mode: '', scope: 'month' }, freshStamp: false, undo: null, restore: null };
+const UI = { tab: 'home', ym: curYm(), filters: { q: '', type: '', cat: '', mode: '', scope: 'month' }, freshStamp: false, undo: null, restore: null, heroTab: 'total' };
 
 /* bridge to js/cloud.js, which fills in signIn, signOut, reauth and push once Firebase has loaded */
 const Cloud = window.HisaabCloud = { on: CLOUD_ON, booted: false, user: null, status: '', loginMsg: '', signIn: null, signOut: null, reauth: null, push: null, onStatus: null, fallback: null };
@@ -135,12 +135,39 @@ function vHome() {
     : `You have used ${rs(-al.left)} of the ${sp.savings}% you planned to save.`;
   else if (t.income > 0) foot = t.saved >= 0 ? `You kept ${Math.round(t.rate)}% of what came in.` : 'You spent more than came in this month.';
   else if (t.spent > 0) foot = 'No income recorded for this month yet.';
-  h += `<section class="hero span">
-    <p class="hero-label">${t.saved < 0 ? 'Overspent in' : 'Saved in'} ${esc(monthName(ym))}</p>
+  /* the yellow block: a switch between all your money, the bank side and the cash side */
+  const tab = UI.heroTab, bank = walletFlow('bank', ym), cash = walletFlow('cash', ym), mon = esc(monthName(ym));
+  const stat = (label, value) => `<div><dt>${label}</dt><dd>${value}</dd></div>`;
+  const heroSwitch = `<div class="seg-ctl hero-switch" role="radiogroup" aria-label="Which money to show">${[['total', 'Total'], ['bank', 'Bank & UPI'], ['cash', 'Cash']]
+    .map(([v, l]) => `<label><input type="radio" name="heroTab" value="${v}" ${v === tab ? 'checked' : ''}><span>${l}</span></label>`).join('')}</div>`;
+  const savedStat = stat(t.saved < 0 ? 'Overspent this month' : 'Saved this month', rs(Math.abs(t.saved)));
+  let heroBody;
+  if (tab === 'total' && (bank.has || cash.has)) {
+    const total = r2((bank.has ? bank.balance : 0) + (cash.has ? cash.balance : 0));
+    heroBody = `<p class="hero-label">Total money in ${mon}</p>
+    <p class="hero-num${total < 0 ? ' neg' : ''}">${rs(total)}</p>
+    <dl class="hero-stats">${stat('Bank & UPI', bank.has ? rs(bank.balance) : 'Not set')}${stat('Cash', cash.has ? rs(cash.balance) : 'Not set')}${savedStat}</dl>`;
+  } else if (tab === 'total') {
+    heroBody = `<p class="hero-label">${t.saved < 0 ? 'Overspent in' : 'Saved in'} ${mon}</p>
     <p class="hero-num${t.saved < 0 ? ' neg' : ''}">${rs(Math.abs(t.saved))}</p>
-    <dl class="hero-stats"><div><dt>Came in</dt><dd>${rs(t.income)}</dd></div><div><dt>Went out</dt><dd>${rs(t.spent)}</dd></div><div><dt>Kept</dt><dd>${t.income > 0 ? Math.round(t.rate) + '%' : 'n/a'}</dd></div></dl>
-    ${stx ? `<p class="hero-got">${icon('check', 's')}Stipend received ${esc(shortDate(stx.date))}</p>` : ''}
-    ${foot ? `<p class="hero-foot">${foot}</p>` : ''}</section>`;
+    <dl class="hero-stats">${stat('Came in', rs(t.income))}${stat('Went out', rs(t.spent))}${stat('Kept', t.income > 0 ? Math.round(t.rate) + '%' : 'n/a')}</dl>
+    <p class="hero-foot">Set your bank and cash balances to see your total money here.</p>`;
+  } else {
+    const w = tab === 'bank' ? bank : cash, name = tab === 'bank' ? 'Bank & UPI' : 'Cash in hand';
+    heroBody = w.has
+      ? `<p class="hero-label">${name} in ${mon}</p>
+    <p class="hero-num${w.balance < 0 ? ' neg' : ''}">${rs(w.balance)}</p>
+    <dl class="hero-stats">${stat('Started with', rs(w.opening))}${stat('Came in', rs(w.in))}${stat('Went out', rs(w.out))}</dl>
+    <p class="hero-foot">Counted from ${esc(shortDate(w.asOf))}. ${tab === 'bank' ? 'Covers UPI, card and bank payments' : 'Covers cash payments'}, and money moved between bank and cash.</p>
+    <button type="button" class="btn small" style="margin-top:12px" data-action="view-passbook" data-key="${tab}" data-ym="${esc(ym)}">View passbook</button>`
+      : `<p class="hero-label">${name} in ${mon}</p>
+    <p class="hero-num">Not set</p>
+    <p class="hero-foot">Enter what you have now and the app keeps the balance up to date with every entry.</p>
+    <button type="button" class="btn small" style="margin-top:12px" data-action="set-wallet" data-key="${tab}" data-ym="${esc(ym)}">Set ${tab === 'bank' ? 'bank' : 'cash'} balance</button>`;
+  }
+  h += `<section class="hero span">${heroSwitch}${heroBody}
+    ${tab === 'total' && stx ? `<p class="hero-got">${icon('check', 's')}Stipend received ${esc(shortDate(stx.date))}</p>` : ''}
+    ${tab === 'total' && foot ? `<p class="hero-foot">${foot}</p>` : ''}</section>`;
   UI.freshStamp = false;
 
   if (!t.count) {
@@ -952,6 +979,7 @@ document.addEventListener('change', e => {
     $('#mode-hint', t.form).textContent = walletImpactHint(typeInp ? typeInp.value : 'expense', modeInp ? modeInp.value : 'UPI', ym);
   }
   if (t.name === 'theme') { S.settings.theme = t.value; S.settings.themeSet = 3; save(); applyTheme(); }
+  if (t.name === 'heroTab') { UI.heroTab = t.value; render(); }
   if (t.name === 'leaves') { S.settings.leaves = t.checked; save(); applyTheme(); }
   const f = { 'f-scope': 'scope', 'f-type': 'type', 'f-cat': 'cat', 'f-mode': 'mode' }[t.id];
   if (f) { UI.filters[f] = t.value; $('#tx-list').innerHTML = txListHtml(); }
