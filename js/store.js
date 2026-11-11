@@ -165,10 +165,50 @@ function adopt(data) {
     if (!parsedWallets[ym]) parsedWallets[ym] = { bank: { balance: null, asOf: null }, cash: { balance: null, asOf: null } };
     parsedWallets[ym].cash = walletOf(wal.cash);
   }
-  f.wallets = Object.fromEntries(Object.keys(parsedWallets).sort().map(k => [k, parsedWallets[k]]));
+  /* Cash is no longer tracked on its own. If any month still has a separate cash balance, fold it into the one balance. */
+  const hasCashData = Object.values(parsedWallets).some(w => w.cash && w.cash.balance !== null);
+  const one = hasCashData ? foldCashIntoOne(parsedWallets, f.tx) : parsedWallets;
+  f.wallets = Object.fromEntries(Object.keys(one).sort().map(k => [k, { bank: one[k].bank, cash: { balance: null, asOf: null } }]));
   f.updatedAt = num(d.updatedAt); f.epoch = num(d.epoch);
   f.trash = Array.isArray(d.trash) ? d.trash.filter(okId).slice(-3000) : [];
   return f;
+}
+/* Rework old data that kept bank and cash apart: each month's starting money becomes bank + cash together.
+   Uses the old rules (UPI, card and bank moved the bank balance; cash moved the cash balance; transfers moved money between them)
+   to work out what each side held, so the combined total is exactly what the app showed before. */
+function foldCashIntoOne(wallets, tx) {
+  const oldModes = { bank: new Set(['UPI', 'Card', 'Bank']), cash: new Set(['Cash']) };
+  const months = Object.keys(wallets).sort();
+  const explicit = (ym, key) => { const w = wallets[ym] && wallets[ym][key]; return w && w.balance !== null && w.asOf ? w : null; };
+  const net = (key, ym, from) => {
+    let n = 0;
+    for (const t of tx) {
+      if (!t.date.startsWith(ym) || t.date < from) continue;
+      if (t.type === 'transfer') { if (t.from === key) n -= t.amount; if (t.to === key) n += t.amount; continue; }
+      if (oldModes[key].has(t.mode)) n += t.type === 'income' ? t.amount : -t.amount;
+    }
+    return n;
+  };
+  const opening = (key, target) => {
+    const first = months.find(m => explicit(m, key));
+    if (!first || target < first) return 0;
+    let bal = 0;
+    for (let ym = first, guard = 0; guard < 600; ym = addMonths(ym, 1), guard++) {
+      const e = explicit(ym, key); let from = ym + '-01';
+      if (e) { bal = e.balance; from = e.asOf; }
+      if (ym === target) return bal;
+      bal = r2(bal + net(key, ym, from));
+    }
+    return bal;
+  };
+  const out = {};
+  for (const ym of months) {
+    const b = explicit(ym, 'bank'), c = explicit(ym, 'cash');
+    if (!b && !c) continue;
+    const asOf = b && c ? (b.asOf < c.asOf ? b.asOf : c.asOf) : (b || c).asOf;
+    out[ym] = { bank: { balance: Math.max(0, r2(opening('bank', ym) + opening('cash', ym))), asOf }, cash: { balance: null, asOf: null } };
+  }
+  return out;
 }
 function load() {
   try { const raw = localStorage.getItem(KEY); S = raw ? adopt(JSON.parse(raw)) : freshState(); }
@@ -226,15 +266,18 @@ function pinHash(p) { let h = 2166136261; for (const c of 'gh:' + p) { h ^= c.ch
 
 /* ---------- monthly totals ---------- */
 function totals(ym) {
-  const o = { income: 0, spent: 0, needs: 0, wants: 0, byCat: {}, count: 0 };
+  /* income is the stipend only. Gifts, refunds and other money coming in are otherIncome: they join the money you
+     already had, so saving is always "stipend minus spending". Moving money between bank and cash is neither. */
+  const o = { income: 0, otherIncome: 0, spent: 0, needs: 0, wants: 0, byCat: {}, count: 0 };
   for (const t of monthTx(ym)) {
-    o.count++;
-    if (t.type === 'income') { o.income += t.amount; continue; }
     if (t.type === 'transfer') continue;
+    o.count++;
+    if (t.type === 'income') { if (t.cat === 'stipend') o.income += t.amount; else o.otherIncome += t.amount; continue; }
     o.spent += t.amount;
     o[cat(t.cat).group === 'needs' ? 'needs' : 'wants'] += t.amount;
     o.byCat[t.cat] = (o.byCat[t.cat] || 0) + t.amount;
   }
+  o.otherIncome = r2(o.otherIncome);
   for (const k of ['income', 'spent', 'needs', 'wants']) o[k] = r2(o[k]);
   o.saved = r2(o.income - o.spent);
   o.rate = o.income > 0 ? o.saved / o.income * 100 : 0;
@@ -424,7 +467,7 @@ function insights(ym) {
 
 /* ---------- wallet balances ---------- */
 /* Modes that count toward each wallet */
-const BANK_MODES = new Set(['UPI', 'Card', 'Bank']);
+const BANK_MODES = new Set(['UPI', 'Card', 'Bank', 'Cash']);   /* one balance: every way of paying counts */
 const CASH_MODES = new Set(['Cash']);
 
 /* Find the earliest month where an explicit wallet was recorded */
@@ -444,11 +487,7 @@ function walletMonthNet(key, ym, fromDate) {
   for (const t of (S.tx || [])) {
     if (!t.date.startsWith(ym)) continue;
     if (fromDate && t.date < fromDate) continue;
-    if (t.type === 'transfer') {
-      if (t.from === key) net -= t.amount;
-      if (t.to === key) net += t.amount;
-      continue;
-    }
+    if (t.type === 'transfer') continue;   /* old bank-to-cash moves no longer change anything */
     if (!modes.has(t.mode)) continue;
     net += t.type === 'income' ? t.amount : -t.amount;
   }
@@ -520,6 +559,21 @@ function walletFlow(key, ym) {
   return { has: true, opening: info.openingBalance, in: r2(cin), out: r2(cout), balance: info.balance, asOf: info.asOf };
 }
 
+/* The month from the stipend's point of view.
+   Every rupee spent, by UPI, card, bank or cash, comes out of the stipend first; what is left is the saving.
+   The money you already had (plus any other income) stays apart, and is only touched when spending is more than the stipend.
+   Total money is the one Bank & UPI balance; cash is not tracked separately. */
+function stipendView(ym) {
+  const t = totals(ym), bank = getWalletInfo('bank', ym), cash = getWalletInfo('cash', ym);
+  const o = {
+    stipend: t.income, other: t.otherIncome, spent: t.spent,
+    saved: Math.max(0, r2(t.income - t.spent)), overspent: Math.max(0, r2(t.spent - t.income)),
+    has: bank.has || cash.has, total: null, reserve: null,
+  };
+  if (o.has) { o.total = r2((bank.has ? bank.balance : 0) + (cash.has ? cash.balance : 0)); o.reserve = r2(o.total - o.saved); }
+  return o;
+}
+
 function hasWallet(key, ym) {
   const targetYm = ym || (typeof UI !== 'undefined' && UI.ym) || curYm();
   return getWalletInfo(key, targetYm).has;
@@ -552,7 +606,7 @@ function passbookEntries(key, ym) {
   const list = (S.tx || []).filter(t => {
     if (!t.date.startsWith(targetYm)) return false;
     if (t.date < info.asOf) return false;
-    if (t.type === 'transfer') return t.from === key || t.to === key;
+    if (t.type === 'transfer') return false;
     return modes.has(t.mode);
   }).sort((a, b) => a.date.localeCompare(b.date) || a.id.localeCompare(b.id));
 

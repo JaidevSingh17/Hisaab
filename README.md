@@ -7,7 +7,7 @@ Entries are saved on your device and, once you sign in with Google, synced to yo
 
 - **Income, Expense & Budget Tracking**: 50/30/20 budget breakdown, categories, and custom savings goals.
 - **Bank & UPI Balance Tracking**: Set your current bank balance and watch it update automatically with every incoming stipend and UPI/card/bank debit.
-- **Cash in Hand Tracking**: Keep a separate running balance for cash in your pocket.
+- **Stipend saving**: Spending comes out of the month's stipend first, so you always see how much of it is left. Money you already had is kept apart.
 - **Virtual Passbook**: View your chronological passbook showing opening balance, every transaction, and running balance after each entry.
 - **Smart SMS / UPI Auto-fill**: Paste any transaction alert SMS or UPI notification to pre-fill amount, type, mode, note, and category instantly.
 

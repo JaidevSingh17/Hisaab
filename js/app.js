@@ -3,7 +3,7 @@
 
 const $ = (s, r = document) => r.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const UI = { tab: 'home', ym: curYm(), filters: { q: '', type: '', cat: '', mode: '', scope: 'month' }, freshStamp: false, undo: null, restore: null, heroTab: 'total' };
+const UI = { tab: 'home', ym: curYm(), filters: { q: '', type: '', cat: '', mode: '', scope: 'month' }, freshStamp: false, undo: null, restore: null, pbDate: '', pbYm: '', pbKey: 'bank' };
 
 /* bridge to js/cloud.js, which fills in signIn, signOut, reauth and push once Firebase has loaded */
 const Cloud = window.HisaabCloud = { on: CLOUD_ON, booted: false, user: null, status: '', loginMsg: '', signIn: null, signOut: null, reauth: null, push: null, onStatus: null, fallback: null };
@@ -23,7 +23,7 @@ const displayName = () => S.settings.name || (Cloud.user && Cloud.user.name ? Cl
 function walletHomeCards(ym) {
   const targetYm = ym || UI.ym || curYm();
   const hasBank = hasWallet('bank', targetYm);
-  const hasCash = hasWallet('cash', targetYm);
+  const hasCash = false;   /* cash is no longer tracked separately */
   const bankBal = hasBank ? walletBalance('bank', targetYm) : 0;
   const cashBal = hasCash ? walletBalance('cash', targetYm) : 0;
   const mName = monthName(targetYm, true);
@@ -33,7 +33,6 @@ function walletHomeCards(ym) {
       <div class="card-head"><div><h2>${esc(mName)} balances</h2><p class="sub">No starting balance recorded for ${esc(monthName(targetYm))}.</p></div></div>
       <div class="btn-row">
         <button type="button" class="btn small primary" data-action="set-wallet" data-key="bank" data-ym="${esc(targetYm)}">${icon('bank', 's')} Set ${esc(mName)} bank balance</button>
-        <button type="button" class="btn small" data-action="set-wallet" data-key="cash" data-ym="${esc(targetYm)}">${icon('wallet', 's')} Set ${esc(mName)} cash</button>
       </div></section>`;
   }
   const totalAvailable = (hasBank ? bankBal : 0) + (hasCash ? cashBal : 0);
@@ -42,7 +41,7 @@ function walletHomeCards(ym) {
 
   let h = `<section class="card span">
     <div class="wallet-top-header">
-      <div><h2>${esc(mName)} balances</h2><p class="sub">Money in bank and pocket for ${esc(monthName(targetYm))}</p></div>
+      <div><h2>${esc(mName)} balances</h2><p class="sub">Your money for ${esc(monthName(targetYm))}</p></div>
       <div class="wallet-total-tag">Total: <b>${rs(totalAvailable)}</b></div>
     </div>
     <div class="wallet-grid">`;
@@ -60,22 +59,7 @@ function walletHomeCards(ym) {
       </div>
     </div>`;
   }
-  if (hasCash) {
-    const neg = cashBal < 0;
-    h += `<div class="wallet-card">
-      <div style="display:flex;justify-content:space-between;align-items:center">
-        <span class="wallet-label">${icon('wallet', 's')} Cash in hand</span>
-        <button type="button" class="link" data-action="set-wallet" data-key="cash" data-ym="${esc(targetYm)}">Update</button>
-      </div>
-      <span class="wallet-bal${neg ? ' neg' : ''}">${rs(Math.abs(cashBal))}${neg ? ' <small>overdrawn</small>' : ''}</span>
-      <span class="wallet-asof">${wCash.isCarriedForward ? 'Brought forward ' + rs(wCash.balance) + ' from ' + esc(monthName(addMonths(targetYm, -1), true)) : 'Started with ' + rs(wCash.balance) + ' on ' + esc(shortDate(wCash.asOf))}</span>
-      <div class="btn-row" style="margin-top:6px">
-        <button type="button" class="btn small" data-action="view-passbook" data-key="cash" data-ym="${esc(targetYm)}">View passbook</button>
-      </div>
-    </div>`;
-  }
   if (!hasBank) h += `<div class="wallet-card wallet-empty"><button type="button" class="btn small" data-action="set-wallet" data-key="bank" data-ym="${esc(targetYm)}">${icon('bank', 's')} Set ${esc(mName)} bank balance</button></div>`;
-  if (!hasCash) h += `<div class="wallet-card wallet-empty"><button type="button" class="btn small" data-action="set-wallet" data-key="cash" data-ym="${esc(targetYm)}">${icon('wallet', 's')} Set ${esc(mName)} cash</button></div>`;
   h += `</div></section>`;
   return h;
 }
@@ -135,39 +119,21 @@ function vHome() {
     : `You have used ${rs(-al.left)} of the ${sp.savings}% you planned to save.`;
   else if (t.income > 0) foot = t.saved >= 0 ? `You kept ${Math.round(t.rate)}% of what came in.` : 'You spent more than came in this month.';
   else if (t.spent > 0) foot = 'No income recorded for this month yet.';
-  /* the yellow block: a switch between all your money, the bank side and the cash side */
-  const tab = UI.heroTab, bank = walletFlow('bank', ym), cash = walletFlow('cash', ym), mon = esc(monthName(ym));
+  /* the yellow block: what is left of this month's stipend. Bank and cash balances have their own cards above. */
+  const sv = stipendView(ym), mon = esc(monthName(ym));
   const stat = (label, value) => `<div><dt>${label}</dt><dd>${value}</dd></div>`;
-  const heroSwitch = `<div class="seg-ctl hero-switch" role="radiogroup" aria-label="Which money to show">${[['total', 'Total'], ['bank', 'Bank & UPI'], ['cash', 'Cash']]
-    .map(([v, l]) => `<label><input type="radio" name="heroTab" value="${v}" ${v === tab ? 'checked' : ''}><span>${l}</span></label>`).join('')}</div>`;
-  const savedStat = stat(t.saved < 0 ? 'Overspent this month' : 'Saved this month', rs(Math.abs(t.saved)));
-  let heroBody;
-  if (tab === 'total' && (bank.has || cash.has)) {
-    const total = r2((bank.has ? bank.balance : 0) + (cash.has ? cash.balance : 0));
-    heroBody = `<p class="hero-label">Total money in ${mon}</p>
-    <p class="hero-num${total < 0 ? ' neg' : ''}">${rs(total)}</p>
-    <dl class="hero-stats">${stat('Bank & UPI', bank.has ? rs(bank.balance) : 'Not set')}${stat('Cash', cash.has ? rs(cash.balance) : 'Not set')}${savedStat}</dl>`;
-  } else if (tab === 'total') {
-    heroBody = `<p class="hero-label">${t.saved < 0 ? 'Overspent in' : 'Saved in'} ${mon}</p>
-    <p class="hero-num${t.saved < 0 ? ' neg' : ''}">${rs(Math.abs(t.saved))}</p>
-    <dl class="hero-stats">${stat('Came in', rs(t.income))}${stat('Went out', rs(t.spent))}${stat('Kept', t.income > 0 ? Math.round(t.rate) + '%' : 'n/a')}</dl>
-    <p class="hero-foot">Set your bank and cash balances to see your total money here.</p>`;
-  } else {
-    const w = tab === 'bank' ? bank : cash, name = tab === 'bank' ? 'Bank & UPI' : 'Cash in hand';
-    heroBody = w.has
-      ? `<p class="hero-label">${name} in ${mon}</p>
-    <p class="hero-num${w.balance < 0 ? ' neg' : ''}">${rs(w.balance)}</p>
-    <dl class="hero-stats">${stat('Started with', rs(w.opening))}${stat('Came in', rs(w.in))}${stat('Went out', rs(w.out))}</dl>
-    <p class="hero-foot">Counted from ${esc(shortDate(w.asOf))}. ${tab === 'bank' ? 'Covers UPI, card and bank payments' : 'Covers cash payments'}, and money moved between bank and cash.</p>
-    <button type="button" class="btn small" style="margin-top:12px" data-action="view-passbook" data-key="${tab}" data-ym="${esc(ym)}">View passbook</button>`
-      : `<p class="hero-label">${name} in ${mon}</p>
-    <p class="hero-num">Not set</p>
-    <p class="hero-foot">Enter what you have now and the app keeps the balance up to date with every entry.</p>
-    <button type="button" class="btn small" style="margin-top:12px" data-action="set-wallet" data-key="${tab}" data-ym="${esc(ym)}">Set ${tab === 'bank' ? 'bank' : 'cash'} balance</button>`;
-  }
-  h += `<section class="hero span">${heroSwitch}${heroBody}
-    ${tab === 'total' && stx ? `<p class="hero-got">${icon('check', 's')}Stipend received ${esc(shortDate(stx.date))}</p>` : ''}
-    ${tab === 'total' && foot ? `<p class="hero-foot">${foot}</p>` : ''}</section>`;
+  const notes = [];
+  if (sv.stipend > 0 && sv.overspent > 0) notes.push(`Overspent by <b>${rs(sv.overspent)}</b>. That came out of the money you already had.`);
+  if (!sv.stipend && sv.spent > 0) notes.push(`Your stipend has not arrived yet. The ${rs(sv.spent)} spent so far came out of the money you already had.`);
+  if (sv.has && sv.reserve >= 0) notes.push(`Money you already had: <b>${rs(sv.reserve)}</b>${sv.other > 0 ? `, including ${rs(sv.other)} of other income this month` : ''}. It stays apart from your stipend.`);
+  if (sv.has && sv.reserve < 0) notes.push(`You have spent ${rs(-sv.reserve)} more than all the money you had.`);
+  if (al) notes.push(foot);
+  h += `<section class="hero span">
+    <p class="hero-label">Saved from stipend in ${mon}</p>
+    <p class="hero-num">${rs(sv.saved)}</p>
+    <dl class="hero-stats">${stat('Stipend', sv.stipend > 0 ? rs(sv.stipend) : 'Not yet')}${stat('Spent', rs(sv.spent))}${stat('Total money', sv.has ? rs(sv.total) : 'Not set')}</dl>
+    ${stx ? `<p class="hero-got">${icon('check', 's')}Stipend received ${esc(shortDate(stx.date))}</p>` : ''}
+    ${notes.map(n => `<p class="hero-foot">${n}</p>`).join('')}</section>`;
   UI.freshStamp = false;
 
   if (!t.count) {
@@ -202,7 +168,7 @@ function vHome() {
 
 function filteredTx() {
   const f = UI.filters, q = f.q.trim().toLowerCase();
-  return S.tx.filter(t =>
+  return S.tx.filter(t => t.type !== 'transfer' &&
     (f.scope === 'all' || t.date.startsWith(UI.ym)) && (!f.type || t.type === f.type) && (!f.cat || t.cat === f.cat) && (!f.mode || t.mode === f.mode) &&
     (!q || (t.note || '').toLowerCase().includes(q) || cat(t.cat).name.toLowerCase().includes(q) || String(t.amount).includes(q))
   ).sort((a, b) => b.date.localeCompare(a.date) || b.id.localeCompare(a.id));
@@ -235,7 +201,7 @@ function vEntries() {
   <div class="filters">
     <input class="wide" type="search" id="f-q" placeholder="Search notes, categories, amounts" aria-label="Search entries" value="${esc(f.q)}">
     <select id="f-scope" aria-label="Period">${opt('month', monthName(UI.ym), f.scope)}${opt('all', 'All months', f.scope)}</select>
-    <select id="f-type" aria-label="Type">${opt('', 'All types', f.type)}${opt('expense', 'Expenses only', f.type)}${opt('income', 'Income only', f.type)}${opt('transfer', 'Transfers only', f.type)}</select>
+    <select id="f-type" aria-label="Type">${opt('', 'All types', f.type)}${opt('expense', 'Expenses only', f.type)}${opt('income', 'Income only', f.type)}</select>
     <select id="f-cat" aria-label="Category">${opt('', 'All categories', f.cat)}${S.cats.map(c => opt(c.id, c.name, f.cat)).join('')}</select>
     <select id="f-mode" aria-label="Paid by">${opt('', 'Any payment', f.mode)}${MODES.map(m => opt(m, m, f.mode)).join('')}</select>
   </div>
@@ -390,11 +356,9 @@ function vSettings() {
     <div class="set-row"><div class="t"><b>Savings split</b><span>${st.split.needs}% needs, ${st.split.wants}% wants, ${st.split.savings}% savings</span></div>
     <button type="button" class="btn small" data-action="edit-split">Change</button></div></section>
 
-  <section class="card"><div class="card-head"><div><h2>Current month balances (${esc(curMName)})</h2><p class="sub">Set starting bank and cash balances for each month</p></div></div>
+  <section class="card"><div class="card-head"><div><h2>Current month balance (${esc(curMName)})</h2><p class="sub">Set your starting balance for each month</p></div></div>
     <div class="set-row"><div class="t"><b class="ttl">${icon('bank', 's')}Bank &amp; UPI balance</b><span>${hasBankNow ? rs(walletBalance('bank', curM)) + ' (opened ' + rs(wBankNow.balance) + ' on ' + esc(shortDate(wBankNow.asOf)) + ')' : 'Not set for ' + esc(curMName)}</span></div>
-      <div class="btn-row">${hasBankNow ? '<button type="button" class="btn small" data-action="view-passbook" data-key="bank" data-ym="' + esc(curM) + '">Passbook</button>' : ''}<button type="button" class="btn small" data-action="set-wallet" data-key="bank" data-ym="${esc(curM)}">${hasBankNow ? 'Change' : 'Set balance'}</button></div></div>
-    <div class="set-row"><div class="t"><b class="ttl">${icon('wallet', 's')}Cash in hand</b><span>${hasCashNow ? rs(walletBalance('cash', curM)) + ' (opened ' + rs(wCashNow.balance) + ' on ' + esc(shortDate(wCashNow.asOf)) + ')' : 'Not set for ' + esc(curMName)}</span></div>
-      <div class="btn-row">${hasCashNow ? '<button type="button" class="btn small" data-action="view-passbook" data-key="cash" data-ym="' + esc(curM) + '">Passbook</button>' : ''}<button type="button" class="btn small" data-action="set-wallet" data-key="cash" data-ym="${esc(curM)}">${hasCashNow ? 'Change' : 'Set balance'}</button></div></div></section>
+      <div class="btn-row">${hasBankNow ? '<button type="button" class="btn small" data-action="view-passbook" data-key="bank" data-ym="' + esc(curM) + '">Passbook</button>' : ''}<button type="button" class="btn small" data-action="set-wallet" data-key="bank" data-ym="${esc(curM)}">${hasBankNow ? 'Change' : 'Set balance'}</button></div></div></section>
 
   <section class="card"><div class="card-head"><div><h2>Repeating entries</h2><p class="sub">Added by themselves every month on the day you choose</p></div>
     <button type="button" class="btn small" data-action="new-recurring">Add</button></div>
@@ -462,7 +426,7 @@ const ERR = '<p class="err" role="alert"></p>';
 
 function walletImpactHint(type, mode, ym) {
   const targetYm = ym || UI.ym || curYm();
-  const isBank = mode === 'UPI' || mode === 'Bank' || mode === 'Card';
+  const isBank = true;   /* one balance: every way of paying counts */
   const target = isBank ? 'Bank & UPI balance' : 'Cash in hand';
   const key = isBank ? 'bank' : 'cash';
   const mName = monthName(targetYm, true);
@@ -483,7 +447,7 @@ function txSheet(t) {
         <button type="button" class="btn small primary" data-action="apply-sms" style="margin-top:6px;width:100%">Auto-fill details</button>
       </div>
     </div>`}
-    ${radios('type', [['expense', 'Money out'], ['income', 'Money in'], ['transfer', 'ATM / Move cash']], e.type)}
+    ${radios('type', [['expense', 'Money out'], ['income', 'Money in']], e.type)}
     ${amountField(e.amount)}
     <div id="transfer-panel" ${isTransfer ? '' : 'hidden'}>
       <div class="field"><span class="lbl">Transfer direction</span>
@@ -538,59 +502,51 @@ function walletSheet(key, ym) {
     ${amountField(curBal, 'Opening balance in ₹ (' + mName + ')')}
     ${w.isCarriedForward ? `<p class="hint" style="margin-top:-8px;color:var(--brand)">✓ Automatically brought forward from ${esc(monthName(addMonths(targetYm, -1), true))} closing balance. You can enter an amount here if you need to calibrate it.</p>` : ''}
     <div class="field"><label for="f-asof">As of date</label><input id="f-asof" name="asof" type="date" min="${minDate}" max="${maxDate}" value="${curAsOf}" required>
-      <span class="hint">${isBank ? 'Transactions via UPI, Card, or Bank in ' + mName + ' on or after this date will adjust this balance.' : 'Transactions in Cash in ' + mName + ' on or after this date will adjust this balance.'}</span></div>
+      <span class="hint">${isBank ? 'Every entry in ' + mName + ' on or after this date will adjust this balance.' : 'Transactions in Cash in ' + mName + ' on or after this date will adjust this balance.'}</span></div>
     ${ERR}<button class="btn primary block">Save balance</button>
     ${hasExplicit ? '<button type="button" class="btn danger block" data-action="reset-wallet" data-key="' + esc(key) + '" data-ym="' + esc(targetYm) + '">Clear month calibration</button>' : ''}</form>`);
 }
 function passbookSheet(key, ym) {
-  const targetYm = ym || UI.ym || curYm();
-  const isBank = key === 'bank';
-  const mName = monthName(targetYm, true);
+  const targetYm = ym || UI.ym || curYm(), mName = monthName(targetYm, true), isBank = key === 'bank';
   const label = (isBank ? 'Bank & UPI' : 'Cash in Hand') + ' Passbook (' + mName + ')';
+  UI.pbYm = targetYm; UI.pbKey = key;
   if (!hasWallet(key, targetYm)) {
     return openSheet(label, `<div class="stack"><p class="note">No opening balance set for ${esc(monthName(targetYm))}.</p>
       <button type="button" class="btn primary block" data-action="set-wallet" data-key="${esc(key)}" data-ym="${esc(targetYm)}">Set ${esc(mName)} balance</button></div>`);
   }
-  const bal = walletBalance(key, targetYm);
-  const w = getWallet(key, targetYm);
-  const entries = passbookEntries(key, targetYm);
+  const all = passbookEntries(key, targetYm), w = getWallet(key, targetYm);
+  const minDate = targetYm + '-01', maxDate = targetYm === curYm() ? today() : targetYm + '-' + pad(daysIn(targetYm));
+  const day = UI.pbDate && UI.pbDate.slice(0, 7) === targetYm ? UI.pbDate : '';
+  /* one date: the balance that day started with is whatever the last earlier row left behind */
+  const before = day ? all.filter(r => r.date < day || (r.isOpening && r.date <= day)) : [];
+  const startBal = day ? (before.length ? before[before.length - 1].balance : 0) : w.balance;
+  const rows = day ? all.filter(r => r.date === day && !r.isOpening) : all;
   let totalIn = 0, totalOut = 0;
-  for (const row of entries) {
-    if (row.type === 'income') totalIn += row.amount;
-    else if (row.type === 'expense') totalOut += row.amount;
-  }
-  let listHtml = '';
-  if (!entries.length || (entries.length === 1 && entries[0].isOpening)) {
-    listHtml = '<p class="note">No transactions recorded in ' + esc(mName) + ' on or after ' + esc(shortDate(w.asOf)) + '.</p>';
-  } else {
-    listHtml = `<ul class="passbook-list">${entries.map(row => {
-      const isOp = row.type === 'opening';
-      const inAmt = row.type === 'income' || isOp;
-      const sign = isOp ? '' : (row.type === 'income' ? '+' : '−');
-      return `<li class="passbook-row${isOp ? ' pb-opening' : ''}">
-        <div class="pb-left">
-          <b class="pb-title">${esc(row.title)}</b>
-          <span class="pb-sub">${esc(shortDate(row.date))}${row.sub ? ' • ' + esc(row.sub) : ''}</span>
-        </div>
-        <div class="pb-right">
-          <span class="pb-amt ${inAmt ? 'in' : 'out'}">${sign} ${rs(row.amount)}</span>
-          <span class="pb-bal">Bal: ${rs(row.balance)}</span>
-        </div>
-      </li>`;
-    }).reverse().join('')}</ul>`;
-  }
-
+  for (const r of rows) { if (r.type === 'income') totalIn += r.amount; else if (r.type === 'expense') totalOut += r.amount; }
+  const endBal = day ? r2(startBal + totalIn - totalOut) : walletBalance(key, targetYm);
+  const rowHtml = r => {
+    const isOp = r.type === 'opening', sign = isOp ? '' : (r.type === 'income' ? '+' : '−');
+    return `<li class="passbook-row${isOp ? ' pb-opening' : ''}">
+      <div class="pb-left"><b class="pb-title">${esc(r.title)}</b><span class="pb-sub">${esc(niceDate(r.date))}${r.sub ? ', ' + esc(r.sub.replace(' • ', ', ')) : ''}</span></div>
+      <div class="pb-right"><span class="pb-amt ${r.type === 'income' || isOp ? 'in' : 'out'}">${sign} ${rs(r.amount)}</span><span class="pb-bal">Bal: ${rs(r.balance)}</span></div></li>`;
+  };
+  const nothing = day ? `Nothing was recorded on ${esc(niceDate(day))}.` : `No transactions recorded in ${esc(mName)} on or after ${esc(shortDate(w.asOf))}.`;
+  const listHtml = rows.filter(r => !r.isOpening).length
+    ? `<ul class="passbook-list">${rows.map(rowHtml).reverse().join('')}</ul>` : `<p class="note">${nothing}</p>`;
   openSheet(label, `<div class="stack">
+    <div class="field"><label for="pb-date">Show one date</label>
+      <div class="pb-pick"><input id="pb-date" type="date" min="${minDate}" max="${maxDate}" value="${day}">
+      ${day ? '<button type="button" class="btn small" data-action="pb-all-dates">All dates</button>' : ''}</div></div>
     <div class="passbook-summary">
-      <div><span class="lbl">${esc(mName)} Balance</span><p class="hero-num" style="font-size:36px;margin:4px 0">${rs(bal)}</p></div>
+      <div><span class="lbl">${day ? 'Balance at the end of ' + esc(niceDate(day)) : esc(mName) + ' Balance'}</span><p class="hero-num" style="font-size:36px;margin:4px 0">${rs(endBal)}</p></div>
       <div class="pb-stats">
-        <div><span>Opening</span><b>${rs(w.balance)}</b></div>
+        <div><span>${day ? 'Start of day' : 'Opening'}</span><b>${rs(startBal)}</b></div>
         <div><span>Total in</span><b style="color:var(--in)">+${rs(totalIn)}</b></div>
         <div><span>Total out</span><b style="color:var(--over)">−${rs(totalOut)}</b></div>
       </div>
     </div>
     <div class="passbook-ledger">
-      <div class="card-head"><div><h2>Virtual Passbook</h2><p class="sub">${esc(mName)} • latest first • running balance</p></div></div>
+      <div class="card-head"><div><h2>${day ? esc(niceDate(day)) : 'Virtual Passbook'}</h2><p class="sub">${day ? 'Entries on this date' : esc(mName) + ', latest first, running balance'}</p></div></div>
       ${listHtml}
     </div>
     <div class="btn-row">
@@ -828,6 +784,10 @@ const ACTIONS = {
       toast('Could not find amount in that text.');
       return;
     }
+    if (parsed.type === 'transfer') {
+      toast('An ATM withdrawal needs no entry. Add an entry when you spend the cash.');
+      return;
+    }
     const form = sheet.querySelector('form[data-form="tx"]');
     if (!form) return;
     if (parsed.amount) $('#f-amount').value = parsed.amount;
@@ -871,7 +831,8 @@ const ACTIONS = {
   },
   'stipend-settings': stipendSettingsSheet,
   'set-wallet': el => walletSheet(el.dataset.key, el.dataset.ym || UI.ym),
-  'view-passbook': el => passbookSheet(el.dataset.key, el.dataset.ym || UI.ym),
+  'view-passbook': el => { UI.pbDate = ''; passbookSheet(el.dataset.key, el.dataset.ym || UI.ym); },
+  'pb-all-dates'() { UI.pbDate = ''; passbookSheet(UI.pbKey, UI.pbYm); },
   'reset-wallet'(el) {
     const key = el.dataset.key;
     const ym = el.dataset.ym || UI.ym || curYm();
@@ -979,7 +940,7 @@ document.addEventListener('change', e => {
     $('#mode-hint', t.form).textContent = walletImpactHint(typeInp ? typeInp.value : 'expense', modeInp ? modeInp.value : 'UPI', ym);
   }
   if (t.name === 'theme') { S.settings.theme = t.value; S.settings.themeSet = 3; save(); applyTheme(); }
-  if (t.name === 'heroTab') { UI.heroTab = t.value; render(); }
+  if (t.id === 'pb-date') { UI.pbDate = t.value; passbookSheet(UI.pbKey, UI.pbYm); }
   if (t.name === 'leaves') { S.settings.leaves = t.checked; save(); applyTheme(); }
   const f = { 'f-scope': 'scope', 'f-type': 'type', 'f-cat': 'cat', 'f-mode': 'mode' }[t.id];
   if (f) { UI.filters[f] = t.value; $('#tx-list').innerHTML = txListHtml(); }
