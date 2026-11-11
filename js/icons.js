@@ -30,6 +30,7 @@ const ICONS = {
   briefcase: '<rect x="3" y="7" width="18" height="13" rx="2"/><path d="M9 7V5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2M3 13h18"/>',
   laptop: '<rect x="5" y="5" width="14" height="10" rx="1.500"/><path d="M2.500 19h19"/>',
   wallet: '<path d="M4 7a2 2 0 0 1 2-2h11v3"/><rect x="4" y="8" width="17" height="11" rx="2"/><path d="M16.500 13.500h.01M4 7v10"/>',
+  bank: '<path d="M3 21h18M3 10h18M12 3l9 4.5H3L12 3zM5 10v8M9 10v8M15 10v8M19 10v8"/>',
   gift: '<rect x="4" y="9" width="16" height="11" rx="1.500"/><path d="M3 9h18M12 9v11"/><path d="M12 9c-1.500-4-6-4-5-1.500.500 1.200 2.500 1.500 5 1.500zM12 9c1.500-4 6-4 5-1.500-.500 1.200-2.500 1.500-5 1.500z"/>',
   undo: '<path d="M8 5L4 9l4 4"/><path d="M4 9h10a5 5 0 0 1 0 10H9"/>',
   pluscircle: '<circle cx="12" cy="12" r="9"/><path d="M12 8v8M8 12h8"/>',

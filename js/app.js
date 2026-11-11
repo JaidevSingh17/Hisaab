@@ -19,7 +19,77 @@ const displayName = () => S.settings.name || (Cloud.user && Cloud.user.name ? Cl
 
 /* ================= screens ================= */
 
+/* ---- wallet balance home cards ---- */
+function walletHomeCards(ym) {
+  const targetYm = ym || UI.ym || curYm();
+  const hasBank = hasWallet('bank', targetYm);
+  const hasCash = hasWallet('cash', targetYm);
+  const bankBal = hasBank ? walletBalance('bank', targetYm) : 0;
+  const cashBal = hasCash ? walletBalance('cash', targetYm) : 0;
+  const mName = monthName(targetYm, true);
+
+  if (!hasBank && !hasCash) {
+    return `<section class="card wallet-promo span">
+      <div class="card-head"><div><h2>${esc(mName)} balances</h2><p class="sub">No starting balance recorded for ${esc(monthName(targetYm))}.</p></div></div>
+      <div class="btn-row">
+        <button type="button" class="btn small primary" data-action="set-wallet" data-key="bank" data-ym="${esc(targetYm)}">${icon('bank', 's')} Set ${esc(mName)} bank balance</button>
+        <button type="button" class="btn small" data-action="set-wallet" data-key="cash" data-ym="${esc(targetYm)}">${icon('wallet', 's')} Set ${esc(mName)} cash</button>
+      </div></section>`;
+  }
+  const totalAvailable = (hasBank ? bankBal : 0) + (hasCash ? cashBal : 0);
+  const wBank = getWallet('bank', targetYm);
+  const wCash = getWallet('cash', targetYm);
+
+  let h = `<section class="card span">
+    <div class="wallet-top-header">
+      <div><h2>${esc(mName)} balances</h2><p class="sub">Money in bank and pocket for ${esc(monthName(targetYm))}</p></div>
+      <div class="wallet-total-tag">Total: <b>${rs(totalAvailable)}</b></div>
+    </div>
+    <div class="wallet-grid">`;
+  if (hasBank) {
+    const neg = bankBal < 0;
+    h += `<div class="wallet-card">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <span class="wallet-label">${icon('bank', 's')} Bank &amp; UPI</span>
+        <button type="button" class="link" data-action="set-wallet" data-key="bank" data-ym="${esc(targetYm)}">Update</button>
+      </div>
+      <span class="wallet-bal${neg ? ' neg' : ''}">${rs(Math.abs(bankBal))}${neg ? ' <small>overdrawn</small>' : ''}</span>
+      <span class="wallet-asof">${wBank.isCarriedForward ? 'Brought forward ' + rs(wBank.balance) + ' from ' + esc(monthName(addMonths(targetYm, -1), true)) : 'Started with ' + rs(wBank.balance) + ' on ' + esc(shortDate(wBank.asOf))}</span>
+      <div class="btn-row" style="margin-top:6px">
+        <button type="button" class="btn small" data-action="view-passbook" data-key="bank" data-ym="${esc(targetYm)}">View passbook</button>
+      </div>
+    </div>`;
+  }
+  if (hasCash) {
+    const neg = cashBal < 0;
+    h += `<div class="wallet-card">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <span class="wallet-label">${icon('wallet', 's')} Cash in hand</span>
+        <button type="button" class="link" data-action="set-wallet" data-key="cash" data-ym="${esc(targetYm)}">Update</button>
+      </div>
+      <span class="wallet-bal${neg ? ' neg' : ''}">${rs(Math.abs(cashBal))}${neg ? ' <small>overdrawn</small>' : ''}</span>
+      <span class="wallet-asof">${wCash.isCarriedForward ? 'Brought forward ' + rs(wCash.balance) + ' from ' + esc(monthName(addMonths(targetYm, -1), true)) : 'Started with ' + rs(wCash.balance) + ' on ' + esc(shortDate(wCash.asOf))}</span>
+      <div class="btn-row" style="margin-top:6px">
+        <button type="button" class="btn small" data-action="view-passbook" data-key="cash" data-ym="${esc(targetYm)}">View passbook</button>
+      </div>
+    </div>`;
+  }
+  if (!hasBank) h += `<div class="wallet-card wallet-empty"><button type="button" class="btn small" data-action="set-wallet" data-key="bank" data-ym="${esc(targetYm)}">${icon('bank', 's')} Set ${esc(mName)} bank balance</button></div>`;
+  if (!hasCash) h += `<div class="wallet-card wallet-empty"><button type="button" class="btn small" data-action="set-wallet" data-key="cash" data-ym="${esc(targetYm)}">${icon('wallet', 's')} Set ${esc(mName)} cash</button></div>`;
+  h += `</div></section>`;
+  return h;
+}
+
 function txRow(t, withDate) {
+  if (t.type === 'transfer') {
+    const isWithdraw = t.from === 'bank';
+    const title = t.note || (isWithdraw ? 'ATM Cash withdrawal' : 'Cash deposit');
+    const sub = [isWithdraw ? 'Bank → Cash' : 'Cash → Bank', withDate ? shortDate(t.date) : ''].filter(Boolean).join(', ');
+    return `<li><button type="button" class="row" data-action="edit-tx" data-id="${t.id}">
+      <span class="ic">${icon(isWithdraw ? 'bank' : 'wallet')}</span>
+      <span class="t"><b>${esc(title)}</b><span>${esc(sub)}</span></span>
+      <span class="a" style="color:var(--brand)">⇄ ${rs(t.amount)}</span></button></li>`;
+  }
   const c = cat(t.cat);
   const sub = [t.note ? c.name : '', withDate ? shortDate(t.date) : '', t.mode, t.rid ? 'repeats monthly' : ''].filter(Boolean).join(', ');
   return `<li><button type="button" class="row" data-action="edit-tx" data-id="${t.id}">
@@ -35,16 +105,22 @@ function vHome() {
   const who = displayName();
   if (who) h += `<div class="span"><h1 class="page-title">Hello, ${esc(who)}</h1><p class="lede">${isCur ? 'Here is how ' + esc(monthName(ym)) + ' is going.' : 'Here is how ' + esc(monthName(ym)) + ' went.'}</p></div>`;
 
-  if (!S.tx.length && !st.stipend) {
-    h += `<section class="banner span"><p><strong>Start with your stipend</strong>Tell the app how much you earn each month so it can build your plan.</p>
-      <button type="button" class="btn primary" data-action="stipend-settings">Set up stipend</button></section>`;
+  /* 1. TOP BALANCES DASHBOARD (Bank & Cash) */
+  h += walletHomeCards(ym);
+
+  /* 2. DEDICATED MONTHLY STIPEND PROMPT WITH ICON */
+  const stx = stipendTx(ym);
+  if (!stx) {
+    if (st.stipend > 0) {
+      h += `<section class="banner span"><p><strong>${icon('briefcase', 's')} ${monthName(ym, true)} stipend not received yet</strong>
+        ${rs(st.stipend)} usually arrives around the ${ordinal(st.stipendDay)}. Marking it will automatically add it to your Bank &amp; UPI balance.</p>
+        <button type="button" class="btn primary" data-action="stipend-received" data-ym="${esc(ym)}">Mark as received</button></section>`;
+    } else if (!S.tx.length) {
+      h += `<section class="banner span"><p><strong>${icon('briefcase', 's')} Start with your stipend</strong>Tell the app how much you earn each month so it can build your plan.</p>
+        <button type="button" class="btn primary" data-action="stipend-settings">Set up stipend</button></section>`;
+    }
   }
-  if (isCur && st.stipend > 0 && !stipendTx(ym)) {
-    const late = new Date().getDate() > st.stipendDay;
-    h += `<section class="banner span"><p><strong>${late ? 'Stipend is later than usual' : 'Stipend not received yet'}</strong>
-      ${rs(st.stipend)} usually arrives around the ${ordinal(st.stipendDay)}. ${late ? 'The numbers below only count money that has actually arrived.' : ''}</p>
-      <button type="button" class="btn primary" data-action="stipend-received">Mark as received</button></section>`;
-  }
+
   const sinceBackup = st.lastBackup ? (toDate(today()) - toDate(st.lastBackup)) / 864e5 : (toDate(today()) - toDate(st.createdAt)) / 864e5;
   if (S.tx.length >= 5 && sinceBackup >= 14 && !Cloud.user) {
     h += `<section class="banner span"><p><strong>Time for a backup</strong>${st.lastBackup ? 'Your last backup was ' + Math.round(sinceBackup) + ' days ago.' : 'You have not saved a backup yet.'} Your entries exist only on this device.</p>
@@ -52,7 +128,7 @@ function vHome() {
   }
 
   /* the sum */
-  const stx = stipendTx(ym), al = dailyAllowance(ym), sp = st.split;
+  const al = dailyAllowance(ym), sp = st.split;
   let foot = '';
   if (al) foot = al.left > 0
     ? `You can spend about <b>${rs(Math.floor(al.perDay))}</b> a day for the next ${al.days} ${al.days === 1 ? 'day' : 'days'} and still save ${sp.savings}%.`
@@ -93,6 +169,7 @@ function vHome() {
 
   const big = monthTx(ym).filter(x => x.type === 'expense').sort((a, b) => b.amount - a.amount).slice(0, 5);
   if (big.length) h += `<section class="card"><div class="card-head"><h2>Biggest expenses</h2></div><ul class="rows">${big.map(x => txRow(x, true)).join('')}</ul></section>`;
+
   return h;
 }
 
@@ -112,10 +189,15 @@ function txListHtml() {
   }
   let h = '', inc = 0, out = 0;
   const days = new Map();
-  for (const t of list) { if (!days.has(t.date)) days.set(t.date, []); days.get(t.date).push(t); t.type === 'income' ? inc += t.amount : out += t.amount; }
+  for (const t of list) {
+    if (!days.has(t.date)) days.set(t.date, []);
+    days.get(t.date).push(t);
+    if (t.type === 'income') inc += t.amount;
+    else if (t.type === 'expense') out += t.amount;
+  }
   h += `<p class="note" style="margin-bottom:12px">${list.length} ${list.length === 1 ? 'entry' : 'entries'}: ${rs(inc)} in, ${rs(out)} out</p>`;
   for (const [d, items] of days) {
-    const net = items.reduce((a, t) => a + (t.type === 'income' ? t.amount : -t.amount), 0);
+    const net = items.reduce((a, t) => a + (t.type === 'income' ? t.amount : t.type === 'expense' ? -t.amount : 0), 0);
     h += `<div class="day-head"><span>${esc(niceDate(d))}${UI.filters.scope === 'all' ? ' ' + d.slice(0, 4) : ''}</span><span class="num">${net >= 0 ? '+' : '−'} ${rs(Math.abs(net))}</span></div><ul class="rows">${items.map(t => txRow(t)).join('')}</ul>`;
   }
   return h;
@@ -126,7 +208,7 @@ function vEntries() {
   <div class="filters">
     <input class="wide" type="search" id="f-q" placeholder="Search notes, categories, amounts" aria-label="Search entries" value="${esc(f.q)}">
     <select id="f-scope" aria-label="Period">${opt('month', monthName(UI.ym), f.scope)}${opt('all', 'All months', f.scope)}</select>
-    <select id="f-type" aria-label="Type">${opt('', 'Income and expenses', f.type)}${opt('expense', 'Expenses only', f.type)}${opt('income', 'Income only', f.type)}</select>
+    <select id="f-type" aria-label="Type">${opt('', 'All types', f.type)}${opt('expense', 'Expenses only', f.type)}${opt('income', 'Income only', f.type)}${opt('transfer', 'Transfers only', f.type)}</select>
     <select id="f-cat" aria-label="Category">${opt('', 'All categories', f.cat)}${S.cats.map(c => opt(c.id, c.name, f.cat)).join('')}</select>
     <select id="f-mode" aria-label="Paid by">${opt('', 'Any payment', f.mode)}${MODES.map(m => opt(m, m, f.mode)).join('')}</select>
   </div>
@@ -267,12 +349,25 @@ function accountCard() {
 function vSettings() {
   const st = S.settings, seg = (name, opts, cur) => `<div class="seg-ctl" role="radiogroup">${opts.map(([v, l]) => `<label><input type="radio" name="${name}" value="${v}" ${v === cur ? 'checked' : ''}><span>${l}</span></label>`).join('')}</div>`;
   const custom = S.cats.filter(c => !DEFAULT_CATS.some(d => d.id === c.id));
+  const curM = curYm();
+  const curMName = monthName(curM, true);
+  const hasBankNow = hasWallet('bank', curM);
+  const hasCashNow = hasWallet('cash', curM);
+  const wBankNow = getWallet('bank', curM);
+  const wCashNow = getWallet('cash', curM);
+
   return `<div><h1 class="page-title">Settings</h1></div>
   ${accountCard()}
   <section class="card"><div class="set-row"><div class="t"><b>Stipend</b><span>${st.stipend ? rs(st.stipend) + ', usually around the ' + ordinal(st.stipendDay) : 'Not set'}</span></div>
     <button type="button" class="btn small" data-action="stipend-settings">${st.stipend ? 'Change' : 'Set up'}</button></div>
     <div class="set-row"><div class="t"><b>Savings split</b><span>${st.split.needs}% needs, ${st.split.wants}% wants, ${st.split.savings}% savings</span></div>
     <button type="button" class="btn small" data-action="edit-split">Change</button></div></section>
+
+  <section class="card"><div class="card-head"><div><h2>Current month balances (${esc(curMName)})</h2><p class="sub">Set starting bank and cash balances for each month</p></div></div>
+    <div class="set-row"><div class="t"><b class="ttl">${icon('bank', 's')}Bank &amp; UPI balance</b><span>${hasBankNow ? rs(walletBalance('bank', curM)) + ' (opened ' + rs(wBankNow.balance) + ' on ' + esc(shortDate(wBankNow.asOf)) + ')' : 'Not set for ' + esc(curMName)}</span></div>
+      <div class="btn-row">${hasBankNow ? '<button type="button" class="btn small" data-action="view-passbook" data-key="bank" data-ym="' + esc(curM) + '">Passbook</button>' : ''}<button type="button" class="btn small" data-action="set-wallet" data-key="bank" data-ym="${esc(curM)}">${hasBankNow ? 'Change' : 'Set balance'}</button></div></div>
+    <div class="set-row"><div class="t"><b class="ttl">${icon('wallet', 's')}Cash in hand</b><span>${hasCashNow ? rs(walletBalance('cash', curM)) + ' (opened ' + rs(wCashNow.balance) + ' on ' + esc(shortDate(wCashNow.asOf)) + ')' : 'Not set for ' + esc(curMName)}</span></div>
+      <div class="btn-row">${hasCashNow ? '<button type="button" class="btn small" data-action="view-passbook" data-key="cash" data-ym="' + esc(curM) + '">Passbook</button>' : ''}<button type="button" class="btn small" data-action="set-wallet" data-key="cash" data-ym="${esc(curM)}">${hasCashNow ? 'Change' : 'Set balance'}</button></div></div></section>
 
   <section class="card"><div class="card-head"><div><h2>Repeating entries</h2><p class="sub">Added by themselves every month on the day you choose</p></div>
     <button type="button" class="btn small" data-action="new-recurring">Add</button></div>
@@ -338,16 +433,44 @@ const catChips = (type, cur) => catsOf(type).map(c => `<label><input type="radio
 const amountField = (v, label = 'Amount in ₹', name = 'amount') => `<div class="field"><label for="f-${name}">${label}</label><input class="amount" id="f-${name}" name="${name}" type="number" inputmode="decimal" min="0" step="0.01" placeholder="0" value="${v || ''}" required></div>`;
 const ERR = '<p class="err" role="alert"></p>';
 
+function walletImpactHint(type, mode, ym) {
+  const targetYm = ym || UI.ym || curYm();
+  const isBank = mode === 'UPI' || mode === 'Bank' || mode === 'Card';
+  const target = isBank ? 'Bank & UPI balance' : 'Cash in hand';
+  const key = isBank ? 'bank' : 'cash';
+  const mName = monthName(targetYm, true);
+  if (!hasWallet(key, targetYm)) return 'Tip: Set ' + mName + ' ' + target + ' on Home to track your running balance.';
+  return type === 'income' ? '✓ Will add to your ' + mName + ' ' + target : '✓ Will deduct from your ' + mName + ' ' + target;
+}
+
 function txSheet(t) {
   const e = t || { type: 'expense', cat: '', date: UI.ym === curYm() ? today() : UI.ym + '-01', mode: 'UPI', note: '' };
-  openSheet(t ? 'Edit entry' : 'Add entry', `<form class="stack" data-form="tx" data-id="${t ? t.id : ''}" novalidate>
-    ${radios('type', [['expense', 'Money out'], ['income', 'Money in']], e.type)}
+  const txYm = (e.date || today()).slice(0, 7);
+  const isTransfer = e.type === 'transfer';
+  const transferDir = isTransfer ? (e.from === 'cash' ? 'cash-to-bank' : 'bank-to-cash') : 'bank-to-cash';
+  openSheet(t ? (isTransfer ? 'Edit transfer' : 'Edit entry') : 'Add entry', `<form class="stack" data-form="tx" data-id="${t ? t.id : ''}" novalidate>
+    ${t ? '' : `<div class="paste-box">
+      <button type="button" class="btn small" data-action="toggle-paste" style="width:100%">${icon('list', 's')} Paste UPI / Bank SMS to auto-fill</button>
+      <div id="paste-panel" hidden style="margin-top:8px">
+        <textarea id="f-sms" rows="2" placeholder="Paste SMS or UPI alert e.g. 'Debited Rs 320 for Swiggy via UPI'" style="width:100%;padding:8px;border-radius:var(--r-in2);background:var(--panel);border:1.5px solid transparent;font:inherit;font-size:14px;resize:none;box-sizing:border-box"></textarea>
+        <button type="button" class="btn small primary" data-action="apply-sms" style="margin-top:6px;width:100%">Auto-fill details</button>
+      </div>
+    </div>`}
+    ${radios('type', [['expense', 'Money out'], ['income', 'Money in'], ['transfer', 'ATM / Move cash']], e.type)}
     ${amountField(e.amount)}
-    <div class="field"><span class="lbl">Category</span><div class="chips" id="cat-chips">${catChips(e.type, e.cat)}</div></div>
+    <div id="transfer-panel" ${isTransfer ? '' : 'hidden'}>
+      <div class="field"><span class="lbl">Transfer direction</span>
+        ${radios('transferDir', [['bank-to-cash', 'ATM withdrawal (Bank → Cash)'], ['cash-to-bank', 'Cash deposit (Cash → Bank)']], transferDir)}
+      </div>
+    </div>
+    <div id="standard-tx-panel" ${isTransfer ? 'hidden' : ''}>
+      <div class="field"><span class="lbl">Category</span><div class="chips" id="cat-chips">${catChips(e.type === 'transfer' ? 'expense' : e.type, e.cat)}</div></div>
+      <div class="field"><span class="lbl">Paid by</span>${radios('mode', MODES.map(m => [m, m]), e.mode || 'UPI')}
+        <span class="hint" id="mode-hint" style="font-weight:600;color:var(--brand)">${esc(walletImpactHint(e.type, e.mode || 'UPI', txYm))}</span></div>
+    </div>
     <div class="field"><label for="f-date">Date</label><input id="f-date" name="date" type="date" max="${today()}" value="${e.date}" required></div>
-    <div class="field"><span class="lbl">Paid by</span>${radios('mode', MODES.map(m => [m, m]), e.mode || 'UPI')}</div>
-    <div class="field"><label for="f-note">Note <span style="font-weight:400">(optional)</span></label><input id="f-note" name="note" type="text" maxlength="60" placeholder="Chai with friends" value="${esc(e.note)}"></div>
-    ${t ? '' : '<label class="check"><input type="checkbox" name="repeat"><span>Repeat this every month on the same day</span></label>'}
+    <div class="field"><label for="f-note">Note <span style="font-weight:400">(optional)</span></label><input id="f-note" name="note" type="text" maxlength="60" placeholder="${isTransfer ? 'ATM cash withdrawal' : 'Chai with friends'}" value="${esc(e.note)}"></div>
+    ${t ? '' : '<label class="check" id="repeat-check"' + (isTransfer ? ' hidden' : '') + '><input type="checkbox" name="repeat"><span>Repeat this every month on the same day</span></label>'}
     ${ERR}<button class="btn primary block">Save entry</button>
     ${t ? '<button type="button" class="btn danger block" data-action="delete-tx" data-id="' + t.id + '">Delete entry</button>' : ''}</form>`);
   if (!t) $('#f-amount').focus();
@@ -366,18 +489,88 @@ function recurringSheet(r) {
     ${ERR}<button class="btn primary block">Save repeating entry</button>
     ${r ? '<button type="button" class="btn danger block" data-action="delete-recurring" data-id="' + r.id + '" data-confirm="Tap again to delete">Delete repeating entry</button><p class="note">Entries it already added stay in your hisaab.</p>' : ''}</form>`);
 }
-function stipendReceivedSheet() {
-  openSheet('Stipend received', `<form class="stack" data-form="stipend-received" novalidate>
-    ${amountField(S.settings.stipend)}
-    <div class="field"><label for="f-date">Date it arrived</label><input id="f-date" name="date" type="date" max="${today()}" min="${curYm()}-01" value="${today()}" required></div>
-    ${ERR}<button class="btn primary block">Mark as received</button></form>`);
-}
 function stipendSettingsSheet() {
-  openSheet('Your stipend', `<form class="stack" data-form="stipend-settings" novalidate>
+  openSheet('Your stipend', `<form class="stack" data-form="stipend" novalidate>
     ${amountField(S.settings.stipend, 'Monthly stipend in ₹')}
     <div class="field"><label for="f-day">Day it usually arrives</label><input id="f-day" name="day" type="number" inputmode="numeric" min="1" max="31" value="${S.settings.stipendDay}" required>
-      <span class="hint">A rough date is fine. You mark the real date each month when the money lands.</span></div>
+      <span class="hint">A rough date is fine. The app only counts it in your numbers when you mark it as received.</span></div>
     ${ERR}<button class="btn primary block">Save stipend</button></form>`);
+}
+function walletSheet(key, ym) {
+  const targetYm = ym || UI.ym || curYm();
+  const isBank = key === 'bank';
+  const mName = monthName(targetYm, true);
+  const label = (isBank ? 'Bank & UPI balance' : 'Cash in hand') + ' (' + mName + ')';
+  const w = getWallet(key, targetYm);
+  const curBal = w.balance !== null ? w.balance : '';
+  const minDate = targetYm + '-01';
+  const maxDate = targetYm === curYm() ? today() : targetYm + '-' + pad(daysIn(targetYm));
+  const curAsOf = w.asOf || (targetYm === curYm() ? today() : minDate);
+  const hasExplicit = S.wallets && S.wallets[targetYm] && S.wallets[targetYm][key] && S.wallets[targetYm][key].balance !== null;
+  openSheet(label, `<form class="stack" data-form="wallet" data-key="${esc(key)}" data-ym="${esc(targetYm)}" novalidate>
+    ${amountField(curBal, 'Opening balance in ₹ (' + mName + ')')}
+    ${w.isCarriedForward ? `<p class="hint" style="margin-top:-8px;color:var(--brand)">✓ Automatically brought forward from ${esc(monthName(addMonths(targetYm, -1), true))} closing balance. You can enter an amount here if you need to calibrate it.</p>` : ''}
+    <div class="field"><label for="f-asof">As of date</label><input id="f-asof" name="asof" type="date" min="${minDate}" max="${maxDate}" value="${curAsOf}" required>
+      <span class="hint">${isBank ? 'Transactions via UPI, Card, or Bank in ' + mName + ' on or after this date will adjust this balance.' : 'Transactions in Cash in ' + mName + ' on or after this date will adjust this balance.'}</span></div>
+    ${ERR}<button class="btn primary block">Save balance</button>
+    ${hasExplicit ? '<button type="button" class="btn danger block" data-action="reset-wallet" data-key="' + esc(key) + '" data-ym="' + esc(targetYm) + '">Clear month calibration</button>' : ''}</form>`);
+}
+function passbookSheet(key, ym) {
+  const targetYm = ym || UI.ym || curYm();
+  const isBank = key === 'bank';
+  const mName = monthName(targetYm, true);
+  const label = (isBank ? 'Bank & UPI' : 'Cash in Hand') + ' Passbook (' + mName + ')';
+  if (!hasWallet(key, targetYm)) {
+    return openSheet(label, `<div class="stack"><p class="note">No opening balance set for ${esc(monthName(targetYm))}.</p>
+      <button type="button" class="btn primary block" data-action="set-wallet" data-key="${esc(key)}" data-ym="${esc(targetYm)}">Set ${esc(mName)} balance</button></div>`);
+  }
+  const bal = walletBalance(key, targetYm);
+  const w = getWallet(key, targetYm);
+  const entries = passbookEntries(key, targetYm);
+  let totalIn = 0, totalOut = 0;
+  for (const row of entries) {
+    if (row.type === 'income') totalIn += row.amount;
+    else if (row.type === 'expense') totalOut += row.amount;
+  }
+  let listHtml = '';
+  if (!entries.length || (entries.length === 1 && entries[0].isOpening)) {
+    listHtml = '<p class="note">No transactions recorded in ' + esc(mName) + ' on or after ' + esc(shortDate(w.asOf)) + '.</p>';
+  } else {
+    listHtml = `<ul class="passbook-list">${entries.map(row => {
+      const isOp = row.type === 'opening';
+      const inAmt = row.type === 'income' || isOp;
+      const sign = isOp ? '' : (row.type === 'income' ? '+' : '−');
+      return `<li class="passbook-row${isOp ? ' pb-opening' : ''}">
+        <div class="pb-left">
+          <b class="pb-title">${esc(row.title)}</b>
+          <span class="pb-sub">${esc(shortDate(row.date))}${row.sub ? ' • ' + esc(row.sub) : ''}</span>
+        </div>
+        <div class="pb-right">
+          <span class="pb-amt ${inAmt ? 'in' : 'out'}">${sign} ${rs(row.amount)}</span>
+          <span class="pb-bal">Bal: ${rs(row.balance)}</span>
+        </div>
+      </li>`;
+    }).reverse().join('')}</ul>`;
+  }
+
+  openSheet(label, `<div class="stack">
+    <div class="passbook-summary">
+      <div><span class="lbl">${esc(mName)} Balance</span><p class="hero-num" style="font-size:36px;margin:4px 0">${rs(bal)}</p></div>
+      <div class="pb-stats">
+        <div><span>Opening</span><b>${rs(w.balance)}</b></div>
+        <div><span>Total in</span><b style="color:var(--in)">+${rs(totalIn)}</b></div>
+        <div><span>Total out</span><b style="color:var(--over)">−${rs(totalOut)}</b></div>
+      </div>
+    </div>
+    <div class="passbook-ledger">
+      <div class="card-head"><div><h2>Virtual Passbook</h2><p class="sub">${esc(mName)} • latest first • running balance</p></div></div>
+      ${listHtml}
+    </div>
+    <div class="btn-row">
+      <button type="button" class="btn primary" data-action="add-entry">${icon('plus', 's')} Add entry</button>
+      <button type="button" class="btn" data-action="set-wallet" data-key="${esc(key)}" data-ym="${esc(targetYm)}">Change opening balance</button>
+    </div>
+  </div>`);
 }
 function budgetSheet(id) {
   const c = cat(id), cur = S.budgets[id] || '', spent = totals(UI.ym).byCat[id] || 0;
@@ -454,13 +647,27 @@ function restoreSheet(d) {
 const amt = v => r2(parseFloat(v));
 const FORMS = {
   tx(fd, form) {
-    const amount = amt(fd.get('amount')), c = fd.get('cat'), date = fd.get('date'), type = fd.get('type');
+    const type = fd.get('type') || 'expense', amount = amt(fd.get('amount')), date = fd.get('date');
     if (!(amount > 0)) return 'Enter an amount greater than zero.';
-    if (!c) return 'Pick a category.';
     if (!date) return 'Pick a date.';
     if (date > today()) return 'The date cannot be in the future.';
-    const rec = { type, amount, cat: c, date, mode: fd.get('mode') || 'UPI', note: (fd.get('note') || '').trim() };
     const id = form.dataset.id;
+    if (type === 'transfer') {
+      const dir = fd.get('transferDir') || 'bank-to-cash';
+      const from = dir === 'cash-to-bank' ? 'cash' : 'bank';
+      const to = dir === 'cash-to-bank' ? 'bank' : 'cash';
+      const note = (fd.get('note') || '').trim();
+      const rec = { type: 'transfer', from, to, amount, date, cat: 'other', mode: from === 'bank' ? 'Bank' : 'Cash', note };
+      if (id) Object.assign(S.tx.find(t => t.id === id), rec);
+      else S.tx.unshift({ id: uid(), ...rec });
+      UI.ym = date.slice(0, 7);
+      done(id ? 'Transfer updated' : 'Transfer recorded');
+      applyRecurring(); render();
+      return;
+    }
+    const c = fd.get('cat');
+    if (!c) return 'Pick a category.';
+    const rec = { type, amount, cat: c, date, mode: fd.get('mode') || 'UPI', note: (fd.get('note') || '').trim() };
     if (id) Object.assign(S.tx.find(t => t.id === id), rec);
     else {
       const tx = { id: uid(), ...rec };
@@ -486,21 +693,25 @@ const FORMS = {
     else S.recurring.push({ id: uid(), ...rec, active: true, lastApplied: null, startYm: recurringStart(day) });
     done('Repeating entry saved');
   },
-  'stipend-received'(fd) {
-    const amount = amt(fd.get('amount')), date = fd.get('date');
-    if (!(amount > 0)) return 'Enter the amount that arrived.';
-    if (!date || date > today()) return 'Pick the date it arrived. It cannot be in the future.';
-    S.tx.push({ id: uid(), type: 'income', amount, cat: 'stipend', date, mode: 'Bank', note: '' });
-    if (!S.settings.stipend) S.settings.stipend = amount;
-    UI.freshStamp = true; UI.ym = date.slice(0, 7); UI.tab = 'home';
-    done('Stipend marked as received');
-  },
-  'stipend-settings'(fd) {
+  stipend(fd) {
     const amount = amt(fd.get('amount')), day = parseInt(fd.get('day'), 10);
     if (!(amount > 0)) return 'Enter your monthly stipend.';
     if (!(day >= 1 && day <= 31)) return 'Day must be between 1 and 31.';
     S.settings.stipend = amount; S.settings.stipendDay = day;
     done('Stipend saved');
+  },
+  wallet(fd, form) {
+    const key = form.dataset.key;
+    const ym = form.dataset.ym || (fd.get('asof') || '').slice(0, 7) || curYm();
+    const amount = amt(fd.get('amount'));
+    const asOf = fd.get('asof');
+    if (isNaN(amount) || amount < 0) return 'Enter a balance of zero or more.';
+    if (!asOf || asOf.slice(0, 7) !== ym) return 'Pick a date within ' + monthName(ym, true) + '.';
+    if (asOf > today()) return 'Pick a date on or before today.';
+    if (!S.wallets) S.wallets = {};
+    if (!S.wallets[ym]) S.wallets[ym] = { bank: { balance: null, asOf: null }, cash: { balance: null, asOf: null } };
+    S.wallets[ym][key] = { balance: amount, asOf };
+    done((key === 'bank' ? 'Bank' : 'Cash') + ' balance saved for ' + monthName(ym, true));
   },
   budget(fd, form) {
     const amount = amt(fd.get('amount'));
@@ -575,10 +786,73 @@ const ACTIONS = {
     toast('Entry deleted', 'Undo', () => { S.trash = S.trash.filter(id => id !== t.id); S.tx.push(t); save(); render(); toast('Entry restored'); });
   },
   'close-sheet': closeSheet,
+  'toggle-paste'() {
+    const p = $('#paste-panel');
+    if (p) {
+      p.hidden = !p.hidden;
+      if (!p.hidden) $('#f-sms').focus();
+    }
+  },
+  'apply-sms'() {
+    const sms = ($('#f-sms') ? $('#f-sms').value : '').trim();
+    if (!sms) return;
+    const parsed = parseUpiText(sms);
+    if (!parsed || !parsed.amount) {
+      toast('Could not find amount in that text.');
+      return;
+    }
+    const form = sheet.querySelector('form[data-form="tx"]');
+    if (!form) return;
+    if (parsed.amount) $('#f-amount').value = parsed.amount;
+    if (parsed.type) {
+      const typeRadio = form.querySelector(`input[name="type"][value="${parsed.type}"]`);
+      if (typeRadio && parsed.type === 'transfer') {
+        /* an ATM withdrawal: clicking the option makes the form show its transfer fields, as if tapped by hand */
+        typeRadio.click();
+        const dir = form.querySelector('input[name="transferDir"][value="bank-to-cash"]');
+        if (dir) dir.checked = true;
+      } else if (typeRadio) {
+        typeRadio.checked = true;
+        $('#cat-chips', form).innerHTML = catChips(parsed.type, parsed.cat);
+      }
+    }
+    if (parsed.cat) {
+      const catRadio = form.querySelector(`input[name="cat"][value="${parsed.cat}"]`);
+      if (catRadio) catRadio.checked = true;
+    }
+    if (parsed.mode) {
+      const modeRadio = form.querySelector(`input[name="mode"][value="${parsed.mode}"]`);
+      if (modeRadio) modeRadio.checked = true;
+    }
+    if (parsed.note) $('#f-note').value = parsed.note;
+    const ym = parsed.date ? parsed.date.slice(0, 7) : UI.ym;
+    if ($('#mode-hint', form)) $('#mode-hint', form).textContent = walletImpactHint(parsed.type, parsed.mode, ym);
+    $('#paste-panel').hidden = true;
+    toast('Auto-filled from message!');
+  },
   'prev-month'() { go(() => { UI.ym = addMonths(UI.ym, -1); }); },
   'next-month'() { if (UI.ym < curYm()) go(() => { UI.ym = addMonths(UI.ym, 1); }); },
-  'stipend-received': stipendReceivedSheet,
+  'stipend-received'(el) {
+    const ym = (el && el.dataset && el.dataset.ym) || UI.ym || curYm();
+    const st = S.settings;
+    if (stipendTx(ym)) return;
+    const isCur = ym === curYm();
+    const date = isCur ? today() : ym + '-' + pad(Math.min(st.stipendDay || 1, daysIn(ym)));
+    S.tx.push({ id: uid(), type: 'income', amount: st.stipend || 0, cat: 'stipend', date, mode: 'Bank', note: 'Monthly stipend' });
+    UI.freshStamp = true; UI.ym = ym; UI.tab = 'home';
+    render(); toast('Stipend marked as received');
+  },
   'stipend-settings': stipendSettingsSheet,
+  'set-wallet': el => walletSheet(el.dataset.key, el.dataset.ym || UI.ym),
+  'view-passbook': el => passbookSheet(el.dataset.key, el.dataset.ym || UI.ym),
+  'reset-wallet'(el) {
+    const key = el.dataset.key;
+    const ym = el.dataset.ym || UI.ym || curYm();
+    if (S.wallets && S.wallets[ym]) {
+      S.wallets[ym][key] = { balance: null, asOf: null };
+    }
+    done((key === 'bank' ? 'Bank' : 'Cash') + ' balance cleared for ' + monthName(ym, true));
+  },
   'set-budget': el => budgetSheet(el.dataset.id),
   'remove-budget'(el) { delete S.budgets[el.dataset.id]; done('Limit removed'); },
   'edit-split': splitSheet,
@@ -670,6 +944,13 @@ document.addEventListener('submit', e => {
 document.addEventListener('change', e => {
   const t = e.target;
   if (t.name === 'type' && t.form && $('#cat-chips', t.form)) $('#cat-chips', t.form).innerHTML = catChips(t.value, '');
+  if ((t.name === 'type' || t.name === 'mode' || t.name === 'date') && t.form && $('#mode-hint', t.form)) {
+    const typeInp = t.form.querySelector('input[name="type"]:checked');
+    const modeInp = t.form.querySelector('input[name="mode"]:checked');
+    const dateInp = t.form.querySelector('input[name="date"]');
+    const ym = dateInp && dateInp.value ? dateInp.value.slice(0, 7) : UI.ym;
+    $('#mode-hint', t.form).textContent = walletImpactHint(typeInp ? typeInp.value : 'expense', modeInp ? modeInp.value : 'UPI', ym);
+  }
   if (t.name === 'theme') { S.settings.theme = t.value; S.settings.themeSet = 3; save(); applyTheme(); }
   if (t.name === 'leaves') { S.settings.leaves = t.checked; save(); applyTheme(); }
   const f = { 'f-scope': 'scope', 'f-type': 'type', 'f-cat': 'cat', 'f-mode': 'mode' }[t.id];
@@ -837,19 +1118,29 @@ window.addEventListener('resize', () => moveTabBg(null, true));
 document.querySelectorAll('[data-icon]').forEach(el => { el.innerHTML = icon(el.dataset.icon); });
 /* open one account's data (uid) or, with sign-in switched off, this device's data (no uid) */
 function startSession(uid) {
-  setUser(uid || null);
-  applyTheme(); applyRecurring();
-  UI.tab = 'home'; UI.ym = curYm();
-  $('#login').hidden = true; unlock(); render();
-  if (S.settings.pin) lock();
-  $('#splash').hidden = true;
+  try {
+    setUser(uid || null);
+    applyTheme(); applyRecurring();
+    UI.tab = 'home'; UI.ym = curYm();
+    $('#login').hidden = true; unlock(); render();
+    if (S.settings.pin) lock();
+  } catch (err) {
+    console.error('startSession error:', err);
+  } finally {
+    $('#splash').hidden = true;
+  }
 }
 function showLogin(msg) {
-  closeSheet();
-  $('#lock').hidden = true; $('#login').hidden = false; $('#app').inert = true; $('.fab').hidden = true;
-  $('#login-err').textContent = msg || '';
-  $('#splash').hidden = true;
-  UI.askedName = false;
+  try {
+    closeSheet();
+    $('#lock').hidden = true; $('#login').hidden = false; $('#app').inert = true; $('.fab').hidden = true;
+    $('#login-err').textContent = msg || '';
+    UI.askedName = false;
+  } catch (err) {
+    console.error('showLogin error:', err);
+  } finally {
+    $('#splash').hidden = true;
+  }
 }
 /* called by cloud.js with the newest online copy (a JSON string, or null when nothing is stored online yet) */
 function cloudApply(json) {
@@ -880,12 +1171,17 @@ applyTheme();
 if (Cloud.on) {
   /* stay behind the opening screen until cloud.js knows whether someone is signed in */
   $('#app').inert = true; $('.fab').hidden = true;
-  setTimeout(() => Cloud.fallback(), 8000);
+  setTimeout(() => Cloud.fallback(), 5000);
 } else {
-  applyRecurring();
-  render();
-  if (S.settings.pin) lock();
-  setTimeout(() => { $('#splash').hidden = true; }, LOAD.splash);
+  try {
+    applyRecurring();
+    render();
+    if (S.settings.pin) lock();
+  } catch (err) {
+    console.error('Boot error:', err);
+  } finally {
+    setTimeout(() => { $('#splash').hidden = true; }, LOAD.splash);
+  }
 }
 if ('serviceWorker' in navigator && location.protocol.startsWith('http')) navigator.serviceWorker.register('sw.js').catch(() => {});
 
