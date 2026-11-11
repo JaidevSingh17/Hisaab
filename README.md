@@ -1,7 +1,15 @@
 # GaronchiHisaab
 
 A personal money tracker: what came in, what went out, what you saved, and a plan for the rest.
-Everything is stored on the device you use it on. There is no account and no server.
+Entries are saved on your device and, once you sign in with Google, synced to your own account.
+
+## Features
+
+- **Income, Expense & Budget Tracking**: 50/30/20 budget breakdown, categories, and custom savings goals.
+- **Bank & UPI Balance Tracking**: Set your current bank balance and watch it update automatically with every incoming stipend and UPI/card/bank debit.
+- **Cash in Hand Tracking**: Keep a separate running balance for cash in your pocket.
+- **Virtual Passbook**: View your chronological passbook showing opening balance, every transaction, and running balance after each entry.
+- **Smart SMS / UPI Auto-fill**: Paste any transaction alert SMS or UPI notification to pre-fill amount, type, mode, note, and category instantly.
 
 ## Run it on this computer
 

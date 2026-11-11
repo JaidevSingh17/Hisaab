@@ -33,14 +33,18 @@ const pad = n => String(n).padStart(2, '0');
 const iso = d => d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
 const today = () => iso(new Date());
 const curYm = () => today().slice(0, 7);
-const toDate = s => { const [y, m, d] = s.split('-').map(Number); return new Date(y, m - 1, d || 1); };
+const toDate = s => {
+  if (!s || typeof s !== 'string') return new Date();
+  const [y, m, d] = s.split('-').map(Number);
+  return new Date(y, m - 1, d || 1);
+};
 function addMonths(ym, n) { const d = toDate(ym + '-01'); d.setMonth(d.getMonth() + n); return iso(d).slice(0, 7); }
 function daysIn(ym) { const [y, m] = ym.split('-').map(Number); return new Date(y, m, 0).getDate(); }
 function monthName(ym, short) {
   return toDate(ym + '-01').toLocaleDateString('en-IN', short ? { month: 'short' } : { month: 'long', year: 'numeric' });
 }
 const niceDate = s => toDate(s).toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' });
-const shortDate = s => toDate(s).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
+const shortDate = s => s ? toDate(s).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : '';
 const ordinal = n => n + (n % 100 >= 11 && n % 100 <= 13 ? 'th' : ['th', 'st', 'nd', 'rd'][n % 10] || 'th');
 /* days of the month that have happened so far (whole month for past months) */
 function elapsedDays(ym) { return ym === curYm() ? new Date().getDate() : ym < curYm() ? daysIn(ym) : 0; }
@@ -67,6 +71,7 @@ function freshState() {
     epoch: 0,        // bumped by Erase and Restore, so a reset is never merged back with old entries
     trash: [],       // ids of deleted entries, so a delete on one device is not undone by another
     settings: { name: '', leaves: true, stipend: 0, stipendDay: 1, split: { needs: 50, wants: 30, savings: 20 }, theme: 'light', themeSet: false, pin: null, lastBackup: null, createdAt: today() },
+    wallets: {},
     cats: DEFAULT_CATS.map(c => ({ ...c })),
     tx: [],          // {id, type, amount, cat, date, mode, note, rid?}
     budgets: {},     // catId -> monthly limit
@@ -82,7 +87,7 @@ function adopt(data) {
   const num = (v, min = 0, max = 1e12) => { v = Number(v); return Number.isFinite(v) ? Math.min(max, Math.max(min, v)) : min; };
   const str = (v, n) => String(v ?? '').slice(0, n);
   const arr = v => Array.isArray(v) ? v.filter(x => x && typeof x === 'object') : [];
-  const kind = v => v === 'income' ? 'income' : 'expense';
+  const kind = v => (v === 'income' || v === 'transfer') ? v : 'expense';
   const mode = v => MODES.includes(v) ? v : 'UPI';
 
   const st = d.settings || {}, sp = st.split || {};
@@ -109,6 +114,10 @@ function adopt(data) {
   f.cats = cats;
   f.tx = arr(d.tx).filter(t => okDate(t.date) && num(t.amount) > 0).map(t => {
     const o = { id: okId(t.id) ? t.id : uid(), type: kind(t.type), amount: r2(num(t.amount)), cat: okId(t.cat) ? t.cat : 'other', date: t.date, mode: mode(t.mode), note: str(t.note, 80) };
+    if (t.type === 'transfer') {
+      o.from = t.from === 'cash' ? 'cash' : 'bank';
+      o.to = o.from === 'cash' ? 'bank' : 'cash';   /* always the other wallet */
+    }
     if (okId(t.rid)) o.rid = t.rid;
     return o;
   });
@@ -124,6 +133,39 @@ function adopt(data) {
   }));
   if (!goals.some(g => g.id === 'emergency')) goals.unshift(f.goals[0]);
   f.goals = goals;
+  /* wallets: month-by-month opening balances { [ym]: { bank, cash } } */
+  const wal = d.wallets && typeof d.wallets === 'object' ? d.wallets : {};
+  const walletOf = obj => {
+    const w = obj && typeof obj === 'object' ? obj : {};
+    const hasBal = w.balance !== null && w.balance !== undefined && w.balance !== '';
+    const bal = hasBal ? Number(w.balance) : NaN;
+    return {
+      balance: Number.isFinite(bal) && bal >= 0 ? r2(bal) : null,
+      asOf: okDate(w.asOf) ? w.asOf : null
+    };
+  };
+
+  const parsedWallets = {};
+  for (const k of Object.keys(wal).sort()) {
+    if (/^\d{4}-\d{2}$/.test(k) && wal[k] && typeof wal[k] === 'object') {
+      parsedWallets[k] = {
+        bank: walletOf(wal[k].bank),
+        cash: walletOf(wal[k].cash)
+      };
+    }
+  }
+  // Migrate legacy top-level bank and cash if present (e.g. from earlier session)
+  if (wal.bank && okDate(wal.bank.asOf)) {
+    const ym = wal.bank.asOf.slice(0, 7);
+    if (!parsedWallets[ym]) parsedWallets[ym] = { bank: { balance: null, asOf: null }, cash: { balance: null, asOf: null } };
+    parsedWallets[ym].bank = walletOf(wal.bank);
+  }
+  if (wal.cash && okDate(wal.cash.asOf)) {
+    const ym = wal.cash.asOf.slice(0, 7);
+    if (!parsedWallets[ym]) parsedWallets[ym] = { bank: { balance: null, asOf: null }, cash: { balance: null, asOf: null } };
+    parsedWallets[ym].cash = walletOf(wal.cash);
+  }
+  f.wallets = Object.fromEntries(Object.keys(parsedWallets).sort().map(k => [k, parsedWallets[k]]));
   f.updatedAt = num(d.updatedAt); f.epoch = num(d.epoch);
   f.trash = Array.isArray(d.trash) ? d.trash.filter(okId).slice(-3000) : [];
   return f;
@@ -168,7 +210,8 @@ function mergeStates(a, b) {
     if (seen.has(k)) return false;
     seen.add(k); return true;
   });
-  return adopt({ ...newer, tx, trash: [...trash], updatedAt: Math.max(a.updatedAt, b.updatedAt) });
+  const mergedWallets = { ...(older.wallets || {}), ...(newer.wallets || {}) };
+  return adopt({ ...newer, wallets: mergedWallets, tx, trash: [...trash], updatedAt: Math.max(a.updatedAt, b.updatedAt) });
 }
 function validBackup(d) {
   return d && typeof d === 'object' && Array.isArray(d.tx) && Array.isArray(d.cats) &&
@@ -187,6 +230,7 @@ function totals(ym) {
   for (const t of monthTx(ym)) {
     o.count++;
     if (t.type === 'income') { o.income += t.amount; continue; }
+    if (t.type === 'transfer') continue;
     o.spent += t.amount;
     o[cat(t.cat).group === 'needs' ? 'needs' : 'wants'] += t.amount;
     o.byCat[t.cat] = (o.byCat[t.cat] || 0) + t.amount;
@@ -378,11 +422,234 @@ function insights(ym) {
   return out;
 }
 
+/* ---------- wallet balances ---------- */
+/* Modes that count toward each wallet */
+const BANK_MODES = new Set(['UPI', 'Card', 'Bank']);
+const CASH_MODES = new Set(['Cash']);
+
+/* Find the earliest month where an explicit wallet was recorded */
+function earliestWalletYm(key) {
+  if (!S || !S.wallets) return null;
+  const yms = Object.keys(S.wallets).filter(ym => {
+    const w = S.wallets[ym] && S.wallets[ym][key];
+    return w && w.balance !== null && typeof w.asOf === 'string';
+  }).sort();
+  return yms.length ? yms[0] : null;
+}
+
+/* Net change for wallet in a given month from a given date onwards */
+function walletMonthNet(key, ym, fromDate) {
+  const modes = key === 'bank' ? BANK_MODES : CASH_MODES;
+  let net = 0;
+  for (const t of (S.tx || [])) {
+    if (!t.date.startsWith(ym)) continue;
+    if (fromDate && t.date < fromDate) continue;
+    if (t.type === 'transfer') {
+      if (t.from === key) net -= t.amount;
+      if (t.to === key) net += t.amount;
+      continue;
+    }
+    if (!modes.has(t.mode)) continue;
+    net += t.type === 'income' ? t.amount : -t.amount;
+  }
+  return net;
+}
+
+/* Core banking passbook roll-forward engine.
+   Rolls closing balances forward from the starting month through all intervening months,
+   respecting any explicit month calibration overrides. */
+function getWalletInfo(key, targetYm) {
+  const earliest = earliestWalletYm(key);
+  if (!earliest || targetYm < earliest) {
+    return { has: false, balance: null, openingBalance: null, asOf: null, isCarriedForward: false };
+  }
+
+  let curBal = 0;
+  let curAsOf = null;
+  let isCarried = false;
+
+  let ym = earliest;
+  while (ym <= targetYm) {
+    const explicit = S.wallets[ym] && S.wallets[ym][key];
+    const hasExplicit = explicit && explicit.balance !== null && typeof explicit.asOf === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(explicit.asOf);
+
+    if (hasExplicit) {
+      curBal = explicit.balance;
+      curAsOf = explicit.asOf;
+      isCarried = false;
+    } else {
+      curAsOf = ym + '-01';
+      isCarried = true;
+    }
+
+    if (ym === targetYm) {
+      const openingBal = curBal;
+      const net = walletMonthNet(key, ym, curAsOf);
+      const currentBal = r2(curBal + net);
+      return {
+        has: true,
+        balance: currentBal,
+        openingBalance: openingBal,
+        asOf: curAsOf,
+        isCarriedForward: isCarried,
+        isExplicit: hasExplicit
+      };
+    }
+
+    const net = walletMonthNet(key, ym, curAsOf);
+    curBal = r2(curBal + net);
+    ym = addMonths(ym, 1);
+  }
+
+  return { has: false, balance: null, openingBalance: null, asOf: null, isCarriedForward: false };
+}
+
+function hasWallet(key, ym) {
+  const targetYm = ym || (typeof UI !== 'undefined' && UI.ym) || curYm();
+  return getWalletInfo(key, targetYm).has;
+}
+
+function getWallet(key, ym) {
+  const targetYm = ym || (typeof UI !== 'undefined' && UI.ym) || curYm();
+  const info = getWalletInfo(key, targetYm);
+  return {
+    balance: info.openingBalance,
+    asOf: info.asOf,
+    isCarriedForward: info.isCarriedForward,
+    isExplicit: info.isExplicit
+  };
+}
+
+/* Current balance for wallet in month ym (opening balance + net transactions in that month) */
+function walletBalance(key, ym) {
+  const targetYm = ym || (typeof UI !== 'undefined' && UI.ym) || curYm();
+  const info = getWalletInfo(key, targetYm);
+  return info.has ? info.balance : null;
+}
+
+/* Virtual Passbook for month ym: chronological ledger with running balance */
+function passbookEntries(key, ym) {
+  const targetYm = ym || (typeof UI !== 'undefined' && UI.ym) || curYm();
+  const info = getWalletInfo(key, targetYm);
+  if (!info.has) return [];
+  const modes = key === 'bank' ? BANK_MODES : CASH_MODES;
+  const list = (S.tx || []).filter(t => {
+    if (!t.date.startsWith(targetYm)) return false;
+    if (t.date < info.asOf) return false;
+    if (t.type === 'transfer') return t.from === key || t.to === key;
+    return modes.has(t.mode);
+  }).sort((a, b) => a.date.localeCompare(b.date) || a.id.localeCompare(b.id));
+
+  let running = info.openingBalance;
+  const prevMName = monthName(addMonths(targetYm, -1), true);
+  const rows = [{
+    isOpening: true,
+    date: info.asOf,
+    title: info.isCarriedForward
+      ? 'Brought forward from ' + prevMName
+      : 'Opening balance (' + monthName(targetYm, true) + ')',
+    sub: info.isCarriedForward ? 'Previous month closing balance' : 'Set for this month',
+    type: 'opening',
+    amount: info.openingBalance,
+    balance: running,
+  }];
+  for (const t of list) {
+    let change = 0, isCredit = false, title = t.note, sub = '';
+    if (t.type === 'transfer') {
+      if (t.to === key) {
+        change = t.amount;
+        isCredit = true;
+        title = t.note || (key === 'cash' ? 'ATM Cash withdrawal' : 'Cash deposit');
+        sub = key === 'cash' ? 'From Bank into Cash' : 'From Cash into Bank';
+      } else {
+        change = -t.amount;
+        isCredit = false;
+        title = t.note || (key === 'bank' ? 'ATM Cash withdrawal' : 'Cash deposit');
+        sub = key === 'bank' ? 'From Bank into Cash' : 'From Cash into Bank';
+      }
+    } else {
+      change = t.type === 'income' ? t.amount : -t.amount;
+      isCredit = t.type === 'income';
+      title = t.note || cat(t.cat).name;
+      sub = cat(t.cat).name + (t.mode ? ' • ' + t.mode : '');
+    }
+    running = r2(running + change);
+    rows.push({
+      id: t.id,
+      date: t.date,
+      title: title,
+      sub: sub,
+      type: isCredit ? 'income' : 'expense',
+      amount: t.amount,
+      balance: running,
+    });
+  }
+  return rows;
+}
+
+/* Smart parser for bank SMS and UPI notification texts */
+function parseUpiText(raw) {
+  if (!raw || typeof raw !== 'string') return null;
+  const text = raw.trim();
+  const lower = text.toLowerCase();
+
+  /* 1. Detect type: credit (income) vs debit (expense) */
+  /* Whichever word comes first decides: "debited ...; SWIGGY credited" is money going out.
+     "Credit card" is a kind of card, not money coming in. An ATM withdrawal moves bank money into cash. */
+  const scan = lower.replace(/credit\s*card/g, 'card');
+  const firstAt = re => { const m = scan.match(re); return m ? m.index : Infinity; };
+  const outAt = firstAt(/\b(?:debited|debit|spent|paid|sent|withdrawn|withdrawal|purchase|dr)\b/);
+  const inAt = firstAt(/\b(?:credited|credit|received|refund|refunded|deposited|cr)\b/);
+  let type = inAt < outAt ? 'income' : 'expense';
+  if (type === 'expense' && /\batm\b|cash\s+withdraw|withdrawn/.test(scan)) type = 'transfer';
+
+  /* 2. Extract amount */
+  let amount = null;
+  const amtMatch = text.match(/(?:rs\.?|inr|₹)\s*([\d,]+(?:\.\d{1,2})?)/i) ||
+                   text.match(/(?:debited|credited|spent|paid|received)\s*(?:by|with|for)?\s*(?:rs\.?|inr|₹)?\s*([\d,]+(?:\.\d{1,2})?)/i);
+  if (amtMatch) {
+    amount = r2(parseFloat(amtMatch[1].replace(/,/g, '')));
+  }
+
+  /* 3. Detect payment mode */
+  let mode = 'UPI';
+  if (/\b(?:atm|cash|withdrawn\s+cash)\b/i.test(lower)) mode = 'Cash';
+  else if (/\b(?:card|debit\s*card|credit\s*card)\b/i.test(lower)) mode = 'Card';
+  else if (/\b(?:neft|rtgs|imps|netbanking|bank\s*transfer)\b/i.test(lower)) mode = 'Bank';
+  else if (/\b(?:upi|gpay|phonepe|paytm)\b/i.test(lower)) mode = 'UPI';
+  if (type === 'transfer') mode = 'Bank';
+
+  /* 4. Detect note / payee */
+  let note = '';
+  const payeeMatch = text.match(/\b(?:to|vpa|info|at|towards|transferred to|paid to)\s+([A-Za-z0-9\s&.\-@]{2,30})/i);
+  if (payeeMatch) {
+    note = payeeMatch[1].replace(/\b(?:on|ref|upi|dated|avbl|bal)\b.*/i, '').trim();
+  }
+
+  /* 5. Guess category from payee / keywords */
+  let catId = type === 'income' ? 'otherinc' : 'other';
+  if (/swiggy|zomato|mcdonald|kfc|starbucks|domino|restaurant|bakery|\b(?:cafe|chai|tea)\b/i.test(lower)) catId = 'food';
+  else if (/uber|rapido|metro|irctc|petrol|diesel|\b(?:ola|fuel)\b/i.test(lower)) catId = 'transport';
+  else if (/blinkit|zepto|instamart|bigbasket|supermarket|grocery|groceries/i.test(lower)) catId = 'groceries';
+  else if (/amazon|flipkart|myntra|ajio|shopping/i.test(lower)) catId = 'shopping';
+  else if (/airtel|jio|recharge|vodafone|broadband|\bvi\b/i.test(lower)) catId = 'mobile';
+  else if (/netflix|spotify|youtube|hotstar|\bprime\b/i.test(lower)) catId = 'subs';
+  else if (/\b(?:rent|pg|hostel)\b/i.test(lower)) catId = 'rent';
+  else if (/hospital|clinic|pharmacy|medplus|apollo|medicine/i.test(lower)) catId = 'health';
+  else if (/stipend|salary/i.test(lower)) catId = 'stipend';
+
+  /* money coming in can only take an income category */
+  if (type === 'income' && catId !== 'stipend') catId = /refund/.test(lower) ? 'refund' : 'otherinc';
+  if (type === 'transfer') catId = 'other';
+  return { type, amount, mode, note, cat: catId };
+}
+
 /* ---------- export ---------- */
 function toCsv(list) {
   const q = v => '"' + String(v ?? '').replace(/"/g, '""') + '"';
   const rows = [['Date', 'Type', 'Category', 'Amount (INR)', 'Paid by', 'Note']];
   for (const t of [...list].sort((a, b) => a.date.localeCompare(b.date)))
-    rows.push([t.date, t.type === 'income' ? 'Income' : 'Expense', cat(t.cat).name, t.amount, t.mode || '', t.note || '']);
+    rows.push([t.date, t.type === 'income' ? 'Income' : t.type === 'transfer' ? 'Transfer' : 'Expense',
+      t.type === 'transfer' ? (t.from === 'bank' ? 'Bank to cash' : 'Cash to bank') : cat(t.cat).name, t.amount, t.mode || '', t.note || '']);
   return '﻿' + rows.map(r => r.map(q).join(',')).join('\r\n');
 }
