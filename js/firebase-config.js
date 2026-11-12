@@ -24,6 +24,7 @@ const ALLOWED_EMAILS = [
   'jaidevsinghchib@gmail.com',
   'kavishatalwar@gmail.com',
   'txbeast17@gmail.com',
+  '10dvarunsharma@gmail.com',
 ];
 
 const CLOUD_ON = !!FIREBASE_CONFIG.apiKey && !FIREBASE_CONFIG.apiKey.startsWith('PASTE');

@@ -8,7 +8,7 @@ service cloud.firestore {
     match /users/{uid} {
       allow read, write: if request.auth != null
         && request.auth.uid == uid
-        && request.auth.token.email in ['jaidevsinghchib@gmail.com', 'kavishatalwar@gmail.com', 'txbeast17@gmail.com'];
+        && request.auth.token.email in ['jaidevsinghchib@gmail.com', 'kavishatalwar@gmail.com', 'txbeast17@gmail.com', '10dvarunsharma@gmail.com'];
     }
   }
 }
